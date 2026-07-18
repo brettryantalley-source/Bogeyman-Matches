@@ -97,6 +97,47 @@ const scoreName = (s, par) => { const d = s - par; return d <= -3 ? "albatross" 
 const fmtPts = (n) => Number.isInteger(n) ? `${n}` : n.toFixed(1);
 const marginText = (m) => m === 0 ? "AS" : m < 0 ? `${-m}↑` : `${m}↓`;
 
+/* ---------- history records (reuses evalMatch; no engine changes) ---------- */
+const nowISO = () => new Date().toISOString();
+const newId = () => "r" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+function buildRecord(base, course, diff, scores, ghost) {
+  const m = evalMatch(scores, ghost.holes);
+  const yourOut = scores.slice(0, 9).reduce((a, s) => a + (s ?? 0), 0);
+  const yourIn = scores.slice(9).reduce((a, s) => a + (s ?? 0), 0);
+  const yourPoints = m.you, ghostPoints = m.opp;
+  const result = yourPoints > 4.0001 ? "W" : yourPoints < 3.9999 ? "L" : "T";
+  return {
+    version: 1,
+    id: base.id, date: base.date,
+    course: course.name, tee: course.tee, ratingSlope: `${course.rating}/${course.slope}`,
+    differentialUsed: diff,
+    holeScores: scores.slice(), ghostHoleScores: ghost.holes.slice(),
+    yourOut, yourIn, yourTotal: m.total.yourTot, ghostTotal: ghost.gross,
+    yourPoints, ghostPoints,
+    result,
+  };
+}
+function deriveStats(history) {
+  const n = history.length;
+  let w = 0, l = 0, t = 0;
+  history.forEach(r => { if (r.result === "W") w++; else if (r.result === "L") l++; else t++; });
+  let streak = null; // consecutive most-recent W or L; a T ends any streak
+  for (let i = history.length - 1; i >= 0; i--) {
+    const r = history[i].result;
+    if (r === "T") break;
+    if (!streak) streak = { type: r, count: 1 };
+    else if (streak.type === r) streak.count++;
+    else break;
+  }
+  const margin = n ? history.reduce((a, r) => a + (r.yourPoints - r.ghostPoints), 0) / n : 0;
+  return {
+    n, w, l, t, streak, margin,
+    recordText: `${w}–${l}–${t}`,
+    streakText: streak ? `${streak.type}${streak.count}` : "—",
+    marginStr: n ? `${margin >= 0 ? "+" : ""}${margin.toFixed(1)}` : "—",
+  };
+}
+
 /* ghost dispersion ring */
 function GhostRing({ value, size = 44, label }) {
   return (
@@ -138,11 +179,22 @@ function StatPill({ label, res, sub }) {
   );
 }
 
+function MiniStat({ label, value, accent }) {
+  return (
+    <div style={{ flex: 1, background: C.card, border: `1px solid ${C.line}`, borderRadius: 12, padding: "9px 6px", textAlign: "center" }}>
+      <div style={{ color: C.sub, fontSize: 9, fontWeight: 800, letterSpacing: 0.6 }}>{label}</div>
+      <div style={{ color: accent || C.ink, fontFamily: NUM, fontSize: 17, fontWeight: 800, marginTop: 2, ...tnum }}>{value}</div>
+    </div>
+  );
+}
+const streakAccent = (stats) => stats.streak ? (stats.streak.type === "W" ? C.green : C.red) : C.sub;
+const marginAccent = (stats) => stats.n ? (stats.margin > 0 ? C.green : stats.margin < 0 ? C.red : C.ink) : C.sub;
+
 const stepBtn = { width: 54, height: 54, borderRadius: 15, background: C.card2, color: C.ink, border: `1px solid ${C.line}`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 };
 const lbl = { color: C.sub, fontSize: 11, fontWeight: 800, letterSpacing: 1 };
 
 /* ---------- setup ---------- */
-function Setup({ courseId, setCourseId, diff, setDiff, onStart }) {
+function Setup({ courseId, setCourseId, diff, setDiff, stats, onStart }) {
   const c = COURSES.find(x => x.id === courseId);
   const g = computeGhost(c, diff);
   return (
@@ -152,6 +204,17 @@ function Setup({ courseId, setCourseId, diff, setDiff, onStart }) {
         <span style={{ color: C.sub, letterSpacing: 2.5, fontSize: 11, fontWeight: 800 }}>BOGEYMAN MATCHES</span>
       </div>
       <h1 style={{ color: C.ink, fontSize: 28, fontWeight: 800, letterSpacing: -0.4, margin: "0 0 18px" }}>New ghost match</h1>
+
+      {stats.n > 0 && (
+        <div style={{ marginBottom: 20 }}>
+          <div style={{ ...lbl, marginBottom: 8 }}>VS THE BOGEYMAN</div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <MiniStat label="RECORD" value={stats.recordText} />
+            <MiniStat label="STREAK" value={stats.streakText} accent={streakAccent(stats)} />
+            <MiniStat label="AVG MARGIN" value={stats.marginStr} accent={marginAccent(stats)} />
+          </div>
+        </div>
+      )}
 
       <div style={lbl}>COURSE</div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, margin: "8px 0 22px" }}>
@@ -197,7 +260,16 @@ function Play({ course, ghost, scores, setScores, hole, setHole, onFinish }) {
   const lead = m.you - m.opp;
   const commitGo = (dir) => { setScores(prev => { const n = [...prev]; if (n[hole] == null) n[hole] = h.par; return n; }); const nx = hole + dir; if (nx >= 0 && nx < 18) setHole(nx); };
   const filled = scores.filter(s => s != null).length;
-  const canFinish = hole === 17 && (scores[17] != null || filled === 17);
+  const allIn = filled === 18;
+  // Finalize is offered once every hole has a score (the current hole's pending
+  // value counts — it commits to par on tap). Disabled otherwise.
+  const onlyCurrentMissing = scores.every((s, i) => s != null || i === hole);
+  const canFinalize = allIn || onlyCurrentMissing;
+  const doFinalize = () => {
+    const committed = scores.map((s, i) => s == null ? course.holes[i].par : s);
+    setScores(committed);
+    onFinish(committed);
+  };
 
   const segSub = (s) => s.done ? `${s.yourSum}–${s.ghostSum}` : (s.holesIn === 0 ? "·" : marginText(s.liveMargin));
   const segLab = (s) => s.done ? (s.res === "win" ? "WON" : s.res === "loss" ? "LOST" : "HALF") : `S${s.idx[0] / 3 + 1}`;
@@ -284,22 +356,111 @@ function Play({ course, ghost, scores, setScores, hole, setHole, onFinish }) {
       {/* nav (thumb zone) */}
       <div style={{ display: "flex", gap: 10, flexShrink: 0 }}>
         <button onClick={() => commitGo(-1)} disabled={hole === 0} style={{ width: 60, height: 52, borderRadius: 14, background: C.card2, color: C.ink, border: `1px solid ${C.line}`, display: "flex", alignItems: "center", justifyContent: "center", opacity: hole === 0 ? 0.4 : 1 }}><ChevronLeft size={22} /></button>
-        {canFinish ? (
-          <button onClick={onFinish} style={{ flex: 1, height: 52, borderRadius: 14, background: C.green, color: "#07140C", fontSize: 16, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}><Flag size={18} /> See result</button>
+        {canFinalize ? (
+          <button onClick={doFinalize} style={{ flex: 1, height: 52, borderRadius: 14, background: C.green, color: "#07140C", fontSize: 16, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}><Flag size={18} /> Finalize round</button>
         ) : (
-          <button onClick={() => commitGo(1)} disabled={hole === 17} style={{ flex: 1, height: 52, borderRadius: 14, background: C.green, color: "#07140C", fontSize: 16, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, opacity: hole === 17 ? 0.4 : 1 }}>Next hole <ChevronRight size={20} /></button>
+          <button onClick={() => commitGo(1)} disabled={hole === 17} style={{ flex: 1, height: 52, borderRadius: 14, background: hole === 17 ? C.card2 : C.green, color: hole === 17 ? C.sub : "#07140C", border: hole === 17 ? `1px solid ${C.line}` : "none", fontSize: 16, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>{hole === 17 ? "Finalize round" : <React.Fragment>Next hole <ChevronRight size={20} /></React.Fragment>}</button>
         )}
       </div>
     </div>
   );
 }
 
+/* ---------- scorecard (Shot-Pattern visual language) ---------- */
+const cellBase = { display: "flex", alignItems: "center", justifyContent: "center", height: 26, fontFamily: NUM, ...tnum };
+const segWash = (res) => res === "win" ? C.greenDim : res === "loss" ? C.slateDim : "transparent";
+
+// par-relative notation: circle=birdie, double circle=eagle+, square=bogey, double square=double+
+function ScoreMark({ score, par }) {
+  if (score == null) return <span style={{ color: C.sub, fontSize: 12 }}>·</span>;
+  const d = score - par;
+  const shape = d <= -2 ? 2 : d === -1 ? 1 : d === 0 ? 0 : d === 1 ? -1 : -2;
+  const ring = Math.abs(shape) >= 1, dbl = Math.abs(shape) >= 2;
+  const ringCol = shape > 0 ? C.green : C.sub;
+  return (
+    <span style={{
+      display: "inline-flex", alignItems: "center", justifyContent: "center",
+      minWidth: 18, height: 18, padding: "0 2px", fontFamily: NUM, fontWeight: 800, fontSize: 11, ...tnum,
+      color: shape > 0 ? C.green : C.ink,
+      borderRadius: shape > 0 ? "50%" : "3px",
+      border: ring ? `1.5px solid ${ringCol}` : "none",
+      outline: dbl ? `1.5px solid ${ringCol}` : "none",
+      outlineOffset: dbl ? "1.5px" : 0,
+    }}>{score}</span>
+  );
+}
+
+function ScoreCard({ course, ghost, scores, m, onTapHole }) {
+  const hasYardage = course.holes.some(h => typeof h.yards === "number");
+  const cols = "26px repeat(9,1fr) 26px 30px";
+  const renderNine = (start) => {
+    const isIn = start === 9;
+    const idx = [...Array(9)].map((_, k) => start + k);
+    const parSum = idx.reduce((a, i) => a + course.holes[i].par, 0);
+    const youSum = idx.reduce((a, i) => a + (scores[i] ?? 0), 0);
+    const ghSum = idx.reduce((a, i) => a + ghost.holes[i], 0);
+    return (
+      <div style={{ display: "grid", gridTemplateColumns: cols, columnGap: 1, rowGap: 2, marginBottom: isIn ? 0 : 10 }}>
+        {/* hole numbers */}
+        <div style={{ ...cellBase, height: 18 }} />
+        {idx.map(i => <div key={"h" + i} style={{ ...cellBase, fontSize: 10, fontWeight: 800, color: C.sub, height: 18 }}>{i + 1}</div>)}
+        <div style={{ ...cellBase, fontSize: 9, fontWeight: 800, color: C.sub, height: 18 }}>{isIn ? "IN" : "OUT"}</div>
+        <div style={{ ...cellBase, fontSize: 9, fontWeight: 800, color: C.sub, height: 18 }}>{isIn ? "TOT" : ""}</div>
+        {/* yardage (rendered only when course data carries it) */}
+        {hasYardage && (
+          <React.Fragment>
+            <div style={{ ...cellBase, justifyContent: "flex-start", fontSize: 9, fontWeight: 800, color: C.sub, height: 16 }}>YDS</div>
+            {idx.map(i => <div key={"y" + i} style={{ ...cellBase, fontSize: 9, color: C.sub, height: 16 }}>{course.holes[i].yards ?? "·"}</div>)}
+            <div style={{ ...cellBase, fontSize: 9, color: C.sub, height: 16 }}>{idx.reduce((a, i) => a + (course.holes[i].yards ?? 0), 0) || ""}</div>
+            <div style={{ ...cellBase, fontSize: 9, color: C.sub, height: 16 }}>{isIn ? (course.holes.reduce((a, h) => a + (h.yards ?? 0), 0) || "") : ""}</div>
+          </React.Fragment>
+        )}
+        {/* par */}
+        <div style={{ ...cellBase, justifyContent: "flex-start", fontSize: 9, fontWeight: 800, letterSpacing: 0.5, color: C.sub }}>PAR</div>
+        {idx.map(i => <div key={"p" + i} style={{ ...cellBase, fontSize: 10, color: C.sub }}>{course.holes[i].par}</div>)}
+        <div style={{ ...cellBase, fontSize: 10, fontWeight: 700, color: C.sub }}>{parSum}</div>
+        <div style={{ ...cellBase, fontSize: 10, fontWeight: 700, color: C.sub }}>{isIn ? course.par : ""}</div>
+        {/* you — tappable, segment-shaded */}
+        <div style={{ ...cellBase, justifyContent: "flex-start", fontSize: 9, fontWeight: 800, letterSpacing: 0.5, color: C.green }}>YOU</div>
+        {idx.map(i => (
+          <button key={"u" + i} onClick={() => onTapHole(i)} style={{ ...cellBase, background: segWash(m.segs[Math.floor(i / 3)].res), borderRadius: 4, padding: 0 }}>
+            <ScoreMark score={scores[i]} par={course.holes[i].par} />
+          </button>
+        ))}
+        <div style={{ ...cellBase, fontSize: 12, fontWeight: 800, color: C.green }}>{youSum}</div>
+        <div style={{ ...cellBase, fontSize: 12, fontWeight: 800, color: C.green }}>{isIn ? scores.reduce((a, s) => a + (s ?? 0), 0) : ""}</div>
+        {/* ghost — projected line, plain numbers in dispersion accent */}
+        <div style={{ ...cellBase, justifyContent: "flex-start", fontSize: 9, fontWeight: 800, letterSpacing: 0.5, color: C.slate }}>GHOST</div>
+        {idx.map(i => <div key={"g" + i} style={{ ...cellBase, background: segWash(m.segs[Math.floor(i / 3)].res), borderRadius: 4, color: C.slate, fontSize: 11, fontWeight: 700 }}>{ghost.holes[i]}</div>)}
+        <div style={{ ...cellBase, fontSize: 12, fontWeight: 800, color: C.slate }}>{ghSum}</div>
+        <div style={{ ...cellBase, fontSize: 12, fontWeight: 800, color: C.slate }}>{isIn ? ghost.gross : ""}</div>
+      </div>
+    );
+  };
+  return (
+    <div style={{ background: C.card, borderRadius: 16, padding: "12px 10px", marginTop: 12 }}>
+      {renderNine(0)}
+      {renderNine(9)}
+    </div>
+  );
+}
+
 /* ---------- summary ---------- */
-function Summary({ course, ghost, scores, onReset }) {
+function Summary({ course, ghost, scores, history, onEditScore, onReset }) {
   const m = evalMatch(scores, ghost.holes);
   const won = m.you > m.opp, tie = m.you === m.opp;
+  const stats = deriveStats(history);
+  const yourTotal = m.total.yourTot;
+  const toPar = yourTotal - course.par;
+  const tp = toPar === 0 ? "E" : toPar > 0 ? `+${toPar}` : `${toPar}`;
+  const yourOut = scores.slice(0, 9).reduce((a, s) => a + (s ?? 0), 0);
+  const yourIn = scores.slice(9).reduce((a, s) => a + (s ?? 0), 0);
   const segSub = (s) => `${s.yourSum}–${s.ghostSum}`;
   const segLab = (s) => s.res === "win" ? "WON" : s.res === "loss" ? "LOST" : "HALF";
+  const [editHole, setEditHole] = useState(null);
+  const [editVal, setEditVal] = useState(0);
+  const openEdit = (i) => { setEditVal(scores[i] ?? course.holes[i].par); setEditHole(i); };
+  const saveEdit = () => { onEditScore(editHole, editVal); setEditHole(null); };
   return (
     <div style={{ maxWidth: 460, margin: "0 auto", padding: "calc(env(safe-area-inset-top) + 18px) 18px 40px" }}>
       <div style={{ color: C.sub, letterSpacing: 2.5, fontSize: 11, fontWeight: 800, textAlign: "center" }}>FINAL · {course.name}</div>
@@ -328,14 +489,66 @@ function Summary({ course, ghost, scores, onReset }) {
         <StatPill label="TOTAL" res={m.total.res} sub={`${m.total.yourTot}–${m.total.ghostTot}`} />
       </div>
 
-      <button onClick={onReset} style={{ width: "100%", marginTop: 24, padding: "15px 0", background: C.card, color: C.ink, borderRadius: 16, border: `1px solid ${C.line}`, fontSize: 15, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}><RotateCcw size={18} /> New round</button>
+      {/* scorecard header + grid */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginTop: 22 }}>
+        <div>
+          <div style={{ color: C.ink, fontWeight: 800, fontSize: 15 }}>{course.name}</div>
+          <div style={{ color: C.sub, fontSize: 11, ...tnum }}>{course.tee} · {course.rating}/{course.slope}</div>
+        </div>
+        <div style={{ textAlign: "right" }}>
+          <div style={{ color: C.green, fontWeight: 800, fontSize: 16, ...tnum }}>{tp}</div>
+          <div style={{ color: C.sub, fontSize: 11, ...tnum }}>{yourOut} · {yourIn} | {yourTotal}</div>
+        </div>
+      </div>
+      <ScoreCard course={course} ghost={ghost} scores={scores} m={m} onTapHole={openEdit} />
+      <div style={{ textAlign: "center", color: C.sub, fontSize: 11, marginTop: 8 }}>Tap any hole in your row to edit</div>
+
+      {/* record vs the Bogeyman (updates live as you edit) */}
+      <div style={{ marginTop: 22 }}>
+        <div style={{ ...lbl, marginBottom: 8 }}>VS THE BOGEYMAN</div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <MiniStat label="RECORD" value={stats.recordText} />
+          <MiniStat label="STREAK" value={stats.streakText} accent={streakAccent(stats)} />
+          <MiniStat label="AVG MARGIN" value={stats.marginStr} accent={marginAccent(stats)} />
+        </div>
+      </div>
+
+      <button onClick={onReset} style={{ width: "100%", marginTop: 22, padding: "15px 0", background: C.card, color: C.ink, borderRadius: 16, border: `1px solid ${C.line}`, fontSize: 15, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}><RotateCcw size={18} /> New round</button>
+
+      {/* inline hole editor */}
+      {editHole != null && (
+        <div onClick={() => setEditHole(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "flex-end", justifyContent: "center", zIndex: 50 }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 460, background: C.card, borderRadius: "20px 20px 0 0", border: `1px solid ${C.line}`, padding: "18px 18px calc(env(safe-area-inset-bottom) + 18px)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+              <div>
+                <div style={{ color: C.ink, fontWeight: 800, fontSize: 16 }}>Hole {editHole + 1}</div>
+                <div style={{ color: C.sub, fontSize: 12, ...tnum }}>Par {course.holes[editHole].par} · stroke index {course.holes[editHole].si}</div>
+              </div>
+              <GhostRing value={ghost.holes[editHole]} size={44} label="GHOST" />
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
+              <button onClick={() => setEditVal(v => Math.max(1, v - 1))} style={stepBtn}><Minus size={24} /></button>
+              <div style={{ flex: 1, textAlign: "center" }}>
+                <div style={{ fontFamily: NUM, fontSize: 52, fontWeight: 800, color: C.green, lineHeight: 1, ...tnum }}>{editVal}</div>
+                <div style={{ color: editVal - course.holes[editHole].par <= 0 ? C.green : C.sub, fontSize: 12, fontWeight: 700, marginTop: 3 }}>{scoreName(editVal, course.holes[editHole].par)}</div>
+              </div>
+              <button onClick={() => setEditVal(v => v + 1)} style={stepBtn}><Plus size={24} /></button>
+            </div>
+            <div style={{ display: "flex", gap: 10 }}>
+              <button onClick={() => setEditHole(null)} style={{ flex: 1, height: 50, borderRadius: 14, background: C.card2, color: C.ink, border: `1px solid ${C.line}`, fontWeight: 800, fontSize: 15 }}>Cancel</button>
+              <button onClick={saveEdit} style={{ flex: 1, height: 50, borderRadius: 14, background: C.green, color: "#07140C", fontWeight: 800, fontSize: 15 }}>Save</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
 /* ---------- localStorage persistence ---------- */
 const LS_KEY = "bogeyman-matches:v1";
-const DEFAULT_STATE = { screen: "setup", courseId: "rp-black", diff: 7.9, scores: Array(18).fill(null), hole: 0 };
+const HIST_KEY = "bogeyman-matches:history:v1";
+const DEFAULT_STATE = { screen: "setup", courseId: "rp-black", diff: 7.9, scores: Array(18).fill(null), hole: 0, roundId: null };
 function loadState() {
   try {
     const raw = localStorage.getItem(LS_KEY);
@@ -350,6 +563,7 @@ function loadState() {
       diff: typeof s.diff === "number" ? s.diff : 7.9,
       scores: s.scores.map(v => (typeof v === "number" && v > 0 ? v : null)),
       hole: Number.isInteger(s.hole) && s.hole >= 0 && s.hole < 18 ? s.hole : 0,
+      roundId: typeof s.roundId === "string" ? s.roundId : null,
     };
   } catch (e) {
     return DEFAULT_STATE;
@@ -357,6 +571,17 @@ function loadState() {
 }
 function saveState(s) {
   try { localStorage.setItem(LS_KEY, JSON.stringify(s)); } catch (e) { /* quota / private mode */ }
+}
+function loadHistory() {
+  try {
+    const raw = localStorage.getItem(HIST_KEY);
+    if (!raw) return [];
+    const a = JSON.parse(raw);
+    return Array.isArray(a) ? a.filter(r => r && typeof r === "object" && Array.isArray(r.holeScores) && Array.isArray(r.ghostHoleScores)) : [];
+  } catch (e) { return []; }
+}
+function saveHistory(h) {
+  try { localStorage.setItem(HIST_KEY, JSON.stringify(h)); } catch (e) { /* quota / private mode */ }
 }
 
 /* ---------- app ---------- */
@@ -367,16 +592,34 @@ function App() {
   const [diff, setDiff] = useState(initial.diff);
   const [scores, setScores] = useState(initial.scores);
   const [hole, setHole] = useState(initial.hole);
-  useEffect(() => { saveState({ screen, courseId, diff, scores, hole }); }, [screen, courseId, diff, scores, hole]);
+  const [roundId, setRoundId] = useState(initial.roundId);
+  const [history, setHistory] = useState(loadHistory());
+  useEffect(() => { saveState({ screen, courseId, diff, scores, hole, roundId }); }, [screen, courseId, diff, scores, hole, roundId]);
+  useEffect(() => { saveHistory(history); }, [history]);
   const course = COURSES.find(c => c.id === courseId);
   const ghost = useMemo(() => computeGhost(course, diff), [course, diff]);
-  const start = () => { setScores(Array(18).fill(null)); setHole(0); setScreen("play"); };
+  const stats = useMemo(() => deriveStats(history), [history]);
+  const start = () => { setScores(Array(18).fill(null)); setHole(0); setRoundId(null); setScreen("play"); };
+  // Finalize: persist the finished round, then a soft (editable) transition to summary.
+  const finalize = (finalScores) => {
+    const rec = buildRecord({ id: newId(), date: nowISO() }, course, diff, finalScores, ghost);
+    setHistory(h => [...h, rec]);
+    setRoundId(rec.id);
+    setScreen("summary");
+  };
+  // Edit a hole from the summary: recompute in place; if finalized, update the stored round.
+  const editScore = (i, v) => {
+    const ns = scores.map((s, k) => k === i ? Math.max(1, v) : s);
+    setScores(ns);
+    if (roundId) setHistory(h => h.map(r => r.id === roundId ? buildRecord({ id: r.id, date: r.date }, course, diff, ns, ghost) : r));
+  };
+  const reset = () => { setRoundId(null); setScreen("setup"); };
   return (
     <div style={{ minHeight: "100dvh", background: C.bg, color: C.ink, fontFamily: SANS }}>
       <style dangerouslySetInnerHTML={{ __html: RESET }} />
-      {screen === "setup" && <Setup courseId={courseId} setCourseId={setCourseId} diff={diff} setDiff={setDiff} onStart={start} />}
-      {screen === "play" && <Play course={course} ghost={ghost} scores={scores} setScores={setScores} hole={hole} setHole={setHole} onFinish={() => setScreen("summary")} />}
-      {screen === "summary" && <Summary course={course} ghost={ghost} scores={scores} onReset={() => setScreen("setup")} />}
+      {screen === "setup" && <Setup courseId={courseId} setCourseId={setCourseId} diff={diff} setDiff={setDiff} stats={stats} onStart={start} />}
+      {screen === "play" && <Play course={course} ghost={ghost} scores={scores} setScores={setScores} hole={hole} setHole={setHole} onFinish={finalize} />}
+      {screen === "summary" && <Summary course={course} ghost={ghost} scores={scores} history={history} onEditScore={editScore} onReset={reset} />}
     </div>
   );
 }

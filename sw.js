@@ -1,5 +1,5 @@
 /* Bogeyman Matches — cache-first service worker */
-const CACHE = 'bogeyman-matches-v2';
+const CACHE = 'bogeyman-matches-v3';
 const SHELL = [
   './',
   './index.html',
