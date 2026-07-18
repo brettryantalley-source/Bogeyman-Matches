@@ -18,6 +18,10 @@ const Plus = (p) => <Icon {...p}><line x1="12" y1="5" x2="12" y2="19" /><line x1
 const Flag = (p) => <Icon {...p}><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z" /><line x1="4" y1="22" x2="4" y2="15" /></Icon>;
 const RotateCcw = (p) => <Icon {...p}><polyline points="1 4 1 10 7 10" /><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" /></Icon>;
 const Target = (p) => <Icon {...p}><circle cx="12" cy="12" r="10" /><circle cx="12" cy="12" r="6" /><circle cx="12" cy="12" r="2" /></Icon>;
+const Trash = (p) => <Icon {...p}><polyline points="3 6 5 6 21 6" /><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" /><line x1="10" y1="11" x2="10" y2="17" /><line x1="14" y1="11" x2="14" y2="17" /><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" /></Icon>;
+
+/* build tag — bump alongside the sw.js cache version so a deploy is confirmable on-screen */
+const BUILD = "v4 · Jul 18";
 
 /* palette — Shot Pattern dark */
 const C = {
@@ -194,20 +198,26 @@ const stepBtn = { width: 54, height: 54, borderRadius: 15, background: C.card2, 
 const lbl = { color: C.sub, fontSize: 11, fontWeight: 800, letterSpacing: 1 };
 
 /* ---------- setup ---------- */
-function Setup({ courseId, setCourseId, diff, setDiff, stats, onStart }) {
+function Setup({ courseId, setCourseId, diff, setDiff, stats, onStart, onHistory }) {
   const c = COURSES.find(x => x.id === courseId);
   const g = computeGhost(c, diff);
   return (
     <div style={{ maxWidth: 460, margin: "0 auto", padding: "calc(env(safe-area-inset-top) + 14px) 18px 40px" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
-        <Target size={16} color={C.green} />
-        <span style={{ color: C.sub, letterSpacing: 2.5, fontSize: 11, fontWeight: 800 }}>BOGEYMAN MATCHES</span>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 4 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <Target size={16} color={C.green} />
+          <span style={{ color: C.sub, letterSpacing: 2.5, fontSize: 11, fontWeight: 800 }}>BOGEYMAN MATCHES</span>
+        </div>
+        <span style={{ color: C.sub, fontSize: 10, fontWeight: 700, ...tnum }}>{BUILD}</span>
       </div>
       <h1 style={{ color: C.ink, fontSize: 28, fontWeight: 800, letterSpacing: -0.4, margin: "0 0 18px" }}>New ghost match</h1>
 
       {stats.n > 0 && (
         <div style={{ marginBottom: 20 }}>
-          <div style={{ ...lbl, marginBottom: 8 }}>VS THE BOGEYMAN</div>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+            <div style={lbl}>VS THE BOGEYMAN</div>
+            <button onClick={onHistory} style={{ color: C.green, fontSize: 11, fontWeight: 800, letterSpacing: 0.5, background: "none", display: "flex", alignItems: "center", gap: 2 }}>HISTORY <ChevronRight size={13} /></button>
+          </div>
           <div style={{ display: "flex", gap: 8 }}>
             <MiniStat label="RECORD" value={stats.recordText} />
             <MiniStat label="STREAK" value={stats.streakText} accent={streakAccent(stats)} />
@@ -545,6 +555,51 @@ function Summary({ course, ghost, scores, history, onEditScore, onReset }) {
   );
 }
 
+/* ---------- history + delete ---------- */
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const fmtDate = (iso) => { const d = new Date(iso); return isNaN(d) ? "" : `${MONTHS[d.getMonth()]} ${d.getDate()}`; };
+const resColor = (r) => r === "W" ? C.green : r === "L" ? C.red : C.slate;
+
+function History({ history, stats, onDelete, onBack }) {
+  const [confirmId, setConfirmId] = useState(null);
+  const rounds = [...history].reverse(); // most recent first
+  return (
+    <div style={{ maxWidth: 460, margin: "0 auto", padding: "calc(env(safe-area-inset-top) + 14px) 18px 40px" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
+        <button onClick={onBack} style={{ width: 44, height: 44, borderRadius: 13, background: C.card2, color: C.ink, border: `1px solid ${C.line}`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><ChevronLeft size={22} /></button>
+        <div>
+          <h1 style={{ color: C.ink, fontSize: 24, fontWeight: 800, letterSpacing: -0.3, margin: 0 }}>Match history</h1>
+          <div style={{ color: C.sub, fontSize: 12, ...tnum }}>{stats.recordText} · {stats.streakText} · {stats.marginStr}</div>
+        </div>
+      </div>
+
+      {rounds.length === 0 ? (
+        <div style={{ textAlign: "center", color: C.sub, fontSize: 14, padding: "48px 0" }}>No rounds logged yet.</div>
+      ) : rounds.map(r => {
+        const confirming = confirmId === r.id;
+        const margin = r.yourPoints - r.ghostPoints;
+        return (
+          <div key={r.id} style={{ display: "flex", alignItems: "center", gap: 12, background: C.card, border: `1px solid ${C.line}`, borderRadius: 14, padding: "12px 14px", marginBottom: 8 }}>
+            <div style={{ width: 34, height: 34, borderRadius: 9, background: C.card2, color: resColor(r.result), display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 15, flexShrink: 0 }}>{r.result}</div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ color: C.ink, fontWeight: 700, fontSize: 14, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{r.course}<span style={{ color: C.sub, fontWeight: 600 }}> · {r.tee}</span></div>
+              <div style={{ color: C.sub, fontSize: 11, ...tnum }}>{fmtDate(r.date)} · {fmtPts(r.yourPoints)}–{fmtPts(r.ghostPoints)} · {margin >= 0 ? "+" : ""}{margin.toFixed(1)}</div>
+            </div>
+            {confirming ? (
+              <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+                <button onClick={() => setConfirmId(null)} style={{ height: 34, padding: "0 12px", borderRadius: 9, background: C.card2, color: C.ink, border: `1px solid ${C.line}`, fontWeight: 800, fontSize: 12 }}>Cancel</button>
+                <button onClick={() => { onDelete(r.id); setConfirmId(null); }} style={{ height: 34, padding: "0 12px", borderRadius: 9, background: C.red, color: "#fff", fontWeight: 800, fontSize: 12 }}>Delete</button>
+              </div>
+            ) : (
+              <button onClick={() => setConfirmId(r.id)} style={{ width: 34, height: 34, borderRadius: 9, background: C.card2, color: C.sub, border: `1px solid ${C.line}`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><Trash size={16} /></button>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 /* ---------- localStorage persistence ---------- */
 const LS_KEY = "bogeyman-matches:v1";
 const HIST_KEY = "bogeyman-matches:history:v1";
@@ -614,12 +669,15 @@ function App() {
     if (roundId) setHistory(h => h.map(r => r.id === roundId ? buildRecord({ id: r.id, date: r.date }, course, diff, ns, ghost) : r));
   };
   const reset = () => { setRoundId(null); setScreen("setup"); };
+  // Delete a stored round so test rounds never pollute the record.
+  const deleteRound = (id) => { setHistory(h => h.filter(r => r.id !== id)); if (id === roundId) setRoundId(null); };
   return (
     <div style={{ minHeight: "100dvh", background: C.bg, color: C.ink, fontFamily: SANS }}>
       <style dangerouslySetInnerHTML={{ __html: RESET }} />
-      {screen === "setup" && <Setup courseId={courseId} setCourseId={setCourseId} diff={diff} setDiff={setDiff} stats={stats} onStart={start} />}
+      {screen === "setup" && <Setup courseId={courseId} setCourseId={setCourseId} diff={diff} setDiff={setDiff} stats={stats} onStart={start} onHistory={() => setScreen("history")} />}
       {screen === "play" && <Play course={course} ghost={ghost} scores={scores} setScores={setScores} hole={hole} setHole={setHole} onFinish={finalize} />}
       {screen === "summary" && <Summary course={course} ghost={ghost} scores={scores} history={history} onEditScore={editScore} onReset={reset} />}
+      {screen === "history" && <History history={history} stats={stats} onDelete={deleteRound} onBack={() => setScreen("setup")} />}
     </div>
   );
 }
