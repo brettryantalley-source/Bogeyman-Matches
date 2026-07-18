@@ -48,6 +48,8 @@ const COURSES = [
   { id: "rp-blue", name: "RiverPines", tee: "Blue", rating: 69.4, slope: 127, par: 70, holes: mk([4,4,3,4,3,4,4,5,4,4,4,4,4,3,4,3,5,4],[7,9,17,1,13,5,11,3,15,12,6,14,8,18,4,16,10,2]) },
   { id: "chico-gold", name: "Chicopee Mill/Sch", tee: "Gold", rating: 72.7, slope: 135, par: 72, holes: mk([5,3,4,5,3,4,4,4,4,4,4,4,3,5,4,4,3,5],[17,15,11,7,3,1,13,5,9,4,16,12,18,10,2,8,14,6]) },
   { id: "chico-blue", name: "Chicopee Mill/Sch", tee: "Blue", rating: 71.2, slope: 131, par: 72, holes: mk([5,3,4,5,3,4,4,4,4,4,4,4,3,5,4,4,3,5],[17,15,11,7,3,1,13,5,9,4,16,12,18,10,2,8,14,6]) },
+  { id: "chico-sm-gold", name: "Chicopee Sch/Mill", tee: "Gold", rating: 72.7, slope: 135, par: 72, holes: mk([4,4,4,3,5,4,4,3,5,5,3,4,5,3,4,4,4,4],[4,16,12,18,10,2,8,14,6,17,15,11,7,3,1,13,5,9]) },
+  { id: "chico-sm-blue", name: "Chicopee Sch/Mill", tee: "Blue", rating: 71.2, slope: 131, par: 72, holes: mk([4,4,4,3,5,4,4,3,5,5,3,4,5,3,4,4,4,4],[4,16,12,18,10,2,8,14,6,17,15,11,7,3,1,13,5,9]) },
 ];
 
 /* engine (verified) — do not modify */
@@ -166,9 +168,9 @@ function Setup({ courseId, setCourseId, diff, setDiff, onStart }) {
 
       <div style={lbl}>YOUR LAST-5 DIFFERENTIAL</div>
       <div style={{ display: "flex", alignItems: "center", gap: 12, margin: "8px 0 24px" }}>
-        <button onClick={() => setDiff(d => Math.max(0, Math.round((d - 0.5) * 10) / 10))} style={stepBtn}><Minus size={20} /></button>
+        <button onClick={() => setDiff(d => Math.max(0, Math.round((d - 0.1) * 10) / 10))} style={stepBtn}><Minus size={20} /></button>
         <div style={{ flex: 1, textAlign: "center", fontFamily: NUM, fontSize: 34, fontWeight: 800, color: C.green, ...tnum }}>{diff.toFixed(1)}</div>
-        <button onClick={() => setDiff(d => Math.round((d + 0.5) * 10) / 10)} style={stepBtn}><Plus size={20} /></button>
+        <button onClick={() => setDiff(d => Math.round((d + 0.1) * 10) / 10)} style={stepBtn}><Plus size={20} /></button>
       </div>
 
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: C.card, borderRadius: 18, border: `1px solid ${C.line}`, padding: "14px 18px", marginBottom: 24 }}>
