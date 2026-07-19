@@ -15,7 +15,10 @@ A self-contained single-page web app (golf side game). Brett plays head-to-head 
 ## How to ship a change (deploy loop)
 1. Edit `src/app.jsx`.
 2. Run `./build.sh` to regenerate `index.html`.
-3. Bump the cache name in `sw.js` (e.g. `-v2` -> `-v3`). REQUIRED — without it, Brett's installed PWA keeps serving the old cached bundle.
+3. On any deploy that ships user-facing changes, bump BOTH version markers together and keep the numbers in sync:
+   - the cache name in `sw.js` (e.g. `bogeyman-matches-v4` -> `-v5`). REQUIRED — without it, Brett's installed PWA keeps serving the old cached bundle.
+   - the on-screen build tag: `const BUILD = "vN · <date>"` near the top of `src/app.jsx` (just after the icon definitions). Keep the existing `"vN · <date>"` format (e.g. `"v5 · Aug 2"`) and match `vN` to the new cache version.
+   This build tag renders in the top-right of the Setup screen and is the deploy counter Brett reads on his phone to confirm the new bundle actually loaded — so it MUST move every user-facing deploy. Both markers currently sit at v4. (Docs-only commits that don't touch app code skip this step and skip `./build.sh`.)
 4. Show Brett a diff.
 5. WAIT for his explicit "go" before git commit / git push. Never push without approval.
 6. Pages redeploys the same URL automatically (~1 min); Brett fully closes and reopens the app to load the new service worker.
