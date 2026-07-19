@@ -21,7 +21,7 @@ const Target = (p) => <Icon {...p}><circle cx="12" cy="12" r="10" /><circle cx="
 const Trash = (p) => <Icon {...p}><polyline points="3 6 5 6 21 6" /><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" /><line x1="10" y1="11" x2="10" y2="17" /><line x1="14" y1="11" x2="14" y2="17" /><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" /></Icon>;
 
 /* build tag — bump alongside the sw.js cache version so a deploy is confirmable on-screen */
-const BUILD = "v4 · Jul 18";
+const BUILD = "v5 · Jul 18";
 
 /* palette — Shot Pattern dark */
 const C = {
@@ -100,6 +100,59 @@ function evalMatch(scores, ghost) {
 const scoreName = (s, par) => { const d = s - par; return d <= -3 ? "albatross" : d === -2 ? "eagle" : d === -1 ? "birdie" : d === 0 ? "par" : d === 1 ? "bogey" : d === 2 ? "double" : d === 3 ? "triple" : `+${d}`; };
 const fmtPts = (n) => Number.isInteger(n) ? `${n}` : n.toFixed(1);
 const marginText = (m) => m === 0 ? "AS" : m < 0 ? `${-m}↑` : `${m}↓`;
+
+/* ---------- Google Sheet auto last-5 differential (read-only; write-back deferred) ---------- */
+const CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vRzaFF9AvD61Y6iWgCyeEVm_bCG2DVW8waalO3Fdom3tFiIC3vmGv_Oqe_9xJQikMvQexT9sTIEu7hQ/pub?gid=0&single=true&output=csv";
+const DIFF_CACHE_KEY = "bogeyman-matches:diff-cache:v1";
+/* minimal RFC-4180-ish CSV parser (handles quoted fields with commas) */
+function parseCSV(text) {
+  const rows = []; let row = [], field = "", q = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (q) {
+      if (ch === '"') { if (text[i + 1] === '"') { field += '"'; i++; } else q = false; }
+      else field += ch;
+    } else if (ch === '"') { q = true; }
+    else if (ch === ",") { row.push(field); field = ""; }
+    else if (ch === "\n") { row.push(field); rows.push(row); row = []; field = ""; }
+    else if (ch === "\r") { /* skip */ }
+    else field += ch;
+  }
+  if (field.length || row.length) { row.push(field); rows.push(row); }
+  return rows;
+}
+/* tolerant date parse — ISO first (no TZ drift), then Date.parse fallback */
+function parseSheetDate(s) {
+  if (!s) return null;
+  const t = String(s).trim();
+  const iso = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(t);
+  if (iso) { const d = new Date(+iso[1], +iso[2] - 1, +iso[3]); return isNaN(d.getTime()) ? null : d; }
+  const ms = Date.parse(t);
+  return isNaN(ms) ? null : new Date(ms);
+}
+const fmtSheetShort = (d) => { try { return `${MONTHS[d.getMonth()]} ${d.getDate()}`; } catch (e) { return ""; } };
+/* CSV text -> {diff, asOf, count} from the 5 most-recent valid rows, or null */
+function computeLast5(text) {
+  const rows = parseCSV(text);
+  if (rows.length < 2) return null;
+  const header = rows[0].map(h => h.trim().toLowerCase());
+  const di = header.indexOf("date");
+  const fi = header.indexOf("differential");
+  if (di === -1 || fi === -1) return null;
+  const recs = [];
+  for (let r = 1; r < rows.length; r++) {
+    const d = parseSheetDate(rows[r][di]);
+    const raw = (rows[r][fi] ?? "").trim();
+    const v = parseFloat(raw);
+    if (!d || raw === "" || isNaN(v)) continue;   // skip blanks / notes / summary rows
+    recs.push({ d, v });
+  }
+  if (!recs.length) return null;
+  recs.sort((a, b) => b.d - a.d);
+  const last5 = recs.slice(0, 5);
+  const avg = Math.round((last5.reduce((a, x) => a + x.v, 0) / last5.length) * 10) / 10;
+  return { diff: avg, asOf: last5[0].d, count: last5.length };
+}
 
 /* ---------- history records (reuses evalMatch; no engine changes) ---------- */
 const nowISO = () => new Date().toISOString();
@@ -201,6 +254,45 @@ const lbl = { color: C.sub, fontSize: 11, fontWeight: 800, letterSpacing: 1 };
 function Setup({ courseId, setCourseId, diff, setDiff, stats, onStart, onHistory }) {
   const c = COURSES.find(x => x.id === courseId);
   const g = computeGhost(c, diff);
+
+  /* auto last-5 differential from Brett's published Sheet: cache-first, then
+     network, then manual. Never blocks the screen; override is this-round-only. */
+  const [source, setSource] = useState("loading"); // loading | sheet | cache | manual | none
+  const [asOf, setAsOf] = useState(null);
+  const overridden = React.useRef(false);
+  const aliveRef = React.useRef(true);
+  const syncDiff = React.useCallback(() => {
+    overridden.current = false;
+    let cache = null;
+    try { const raw = localStorage.getItem(DIFF_CACHE_KEY); if (raw) { const cc = JSON.parse(raw); if (cc && typeof cc.diff === "number") cache = cc; } } catch (e) { /* ignore */ }
+    if (cache) { setDiff(cache.diff); setAsOf(cache.asOf ? new Date(cache.asOf) : null); setSource("cache"); }
+    else { setSource("loading"); }
+    fetch(CSV_URL, { redirect: "follow", cache: "no-store" })
+      .then(r => r.ok ? r.text() : Promise.reject(new Error("http " + r.status)))
+      .then(text => {
+        const res = computeLast5(text);
+        if (!res) throw new Error("no valid rows");
+        try { localStorage.setItem(DIFF_CACHE_KEY, JSON.stringify({ diff: res.diff, asOf: res.asOf.toISOString(), fetchedAt: nowISO() })); } catch (e) { /* quota */ }
+        if (!aliveRef.current || overridden.current) return;
+        setDiff(res.diff); setAsOf(res.asOf); setSource("sheet");
+      })
+      .catch(() => {
+        if (!aliveRef.current || overridden.current) return;
+        setSource(cache ? "cache" : "none");
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [setDiff]);
+  useEffect(() => { aliveRef.current = true; syncDiff(); return () => { aliveRef.current = false; }; }, [syncDiff]);
+  const bumpDiff = (delta) => { overridden.current = true; setSource("manual"); setDiff(d => Math.max(0, Math.round((d + delta) * 10) / 10)); };
+  const asOfLbl = asOf ? ` (${fmtSheetShort(asOf)})` : "";
+  const srcLine =
+    source === "loading" ? "Syncing your Sheet…" :
+    source === "sheet" ? `Last-5: ${diff.toFixed(1)} · from your Sheet${asOfLbl}` :
+    source === "cache" ? `Last-5: ${diff.toFixed(1)} · using last synced${asOfLbl}` :
+    source === "manual" ? "Manual override · applies to this round only" :
+    "No sync — set your last-5 differential manually";
+  const srcColor = source === "sheet" ? C.green : source === "manual" ? C.ink : C.sub;
+
   return (
     <div style={{ maxWidth: 460, margin: "0 auto", padding: "calc(env(safe-area-inset-top) + 14px) 18px 40px" }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 4 }}>
@@ -239,12 +331,18 @@ function Setup({ courseId, setCourseId, diff, setDiff, stats, onStart, onHistory
         })}
       </div>
 
-      <div style={lbl}>YOUR LAST-5 DIFFERENTIAL</div>
-      <div style={{ display: "flex", alignItems: "center", gap: 12, margin: "8px 0 24px" }}>
-        <button onClick={() => setDiff(d => Math.max(0, Math.round((d - 0.1) * 10) / 10))} style={stepBtn}><Minus size={20} /></button>
-        <div style={{ flex: 1, textAlign: "center", fontFamily: NUM, fontSize: 34, fontWeight: 800, color: C.green, ...tnum }}>{diff.toFixed(1)}</div>
-        <button onClick={() => setDiff(d => Math.round((d + 0.1) * 10) / 10)} style={stepBtn}><Plus size={20} /></button>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <div style={lbl}>YOUR LAST-5 DIFFERENTIAL</div>
+        {source === "manual" && (
+          <button onClick={syncDiff} style={{ color: C.green, fontSize: 11, fontWeight: 800, letterSpacing: 0.5, background: "none" }}>USE SHEET</button>
+        )}
       </div>
+      <div style={{ display: "flex", alignItems: "center", gap: 12, margin: "8px 0 4px" }}>
+        <button onClick={() => bumpDiff(-0.1)} style={stepBtn}><Minus size={20} /></button>
+        <div style={{ flex: 1, textAlign: "center", fontFamily: NUM, fontSize: 34, fontWeight: 800, color: C.green, ...tnum }}>{diff.toFixed(1)}</div>
+        <button onClick={() => bumpDiff(0.1)} style={stepBtn}><Plus size={20} /></button>
+      </div>
+      <div style={{ color: srcColor, fontSize: 11, fontWeight: 600, margin: "0 0 24px", ...tnum }}>{srcLine}</div>
 
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: C.card, borderRadius: 18, border: `1px solid ${C.line}`, padding: "14px 18px", marginBottom: 24 }}>
         <div>
