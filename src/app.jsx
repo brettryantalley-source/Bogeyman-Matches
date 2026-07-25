@@ -21,7 +21,7 @@ const Target = (p) => <Icon {...p}><circle cx="12" cy="12" r="10" /><circle cx="
 const Trash = (p) => <Icon {...p}><polyline points="3 6 5 6 21 6" /><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" /><line x1="10" y1="11" x2="10" y2="17" /><line x1="14" y1="11" x2="14" y2="17" /><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" /></Icon>;
 
 /* build tag — bump alongside the sw.js cache version so a deploy is confirmable on-screen */
-const BUILD = "v5 · Jul 18";
+const BUILD = "v6 · Jul 20";
 
 /* palette — Shot Pattern dark */
 const C = {
@@ -37,24 +37,68 @@ const RESET = `*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 button{font-family:inherit;cursor:pointer;border:none;padding:0;background:none}
 html,body{margin:0;background:#000}`;
 
-/* courses */
-const mk = (p, s) => p.map((par, i) => ({ par, si: s[i] }));
-const COURSES = [
-  { id: "rp-black", name: "RiverPines", tee: "Black", rating: 71.1, slope: 132, par: 70, holes: mk([4,4,3,4,3,4,4,5,4,4,4,4,4,3,4,3,5,4],[7,9,17,1,13,5,11,3,15,12,6,14,8,18,4,16,10,2]) },
-  { id: "wood", name: "Woodmont G&CC", tee: "Medal", rating: 71.3, slope: 135, par: 72, holes: mk([5,3,4,4,4,3,4,4,5,5,3,4,3,4,3,5,4,5],[15,11,9,1,5,17,7,3,13,12,18,6,14,2,10,4,8,16]) },
-  { id: "bear", name: "Bear Slide", tee: "Blue", rating: 72.3, slope: 134, par: 71, holes: mk([4,4,5,3,4,3,4,5,4,4,4,5,4,3,4,3,4,4],[3,13,17,7,5,11,9,15,1,4,16,10,6,12,14,18,8,2]) },
-  { id: "hamp", name: "Hampton GV", tee: "Blue", rating: 69.9, slope: 131, par: 71, holes: mk([4,3,4,4,5,4,4,3,4,4,3,4,5,3,5,4,3,5],[9,13,11,1,3,17,5,15,7,16,12,2,4,8,10,18,14,6]) },
-  { id: "calla", name: "Callahan", tee: "Black", rating: 72.8, slope: 134, par: 72, holes: mk([5,4,4,5,4,3,4,3,4,5,4,4,4,3,4,4,3,5],[9,5,11,7,1,17,3,15,13,8,4,10,2,18,12,16,14,6]) },
-  { id: "cider", name: "Cider Ridge", tee: "II", rating: 71.7, slope: 130, par: 72, holes: mk([4,4,3,4,5,4,4,3,5,4,4,3,4,4,5,4,3,5],[10,8,2,6,14,4,16,12,18,7,17,11,13,3,9,1,15,5]) },
-  { id: "cres", name: "Crescent Oaks", tee: "Black", rating: 72.7, slope: 134, par: 72, holes: mk([4,5,3,4,4,5,3,4,4,5,3,4,4,4,5,4,3,4],[3,7,11,13,15,5,17,1,9,8,14,2,18,12,10,6,16,4]) },
-  { id: "sanc", name: "Sanctuary Cove", tee: "Blue", rating: 72.1, slope: 126, par: 72, holes: mk([4,4,5,3,4,4,5,3,4,4,4,5,3,4,4,3,5,4],[9,3,1,11,15,5,17,13,7,8,10,14,18,6,16,12,2,4]) },
-  { id: "mtn", name: "Mountain Harbour", tee: "Gold", rating: 69.5, slope: 126, par: 72, holes: mk([5,4,4,3,4,3,4,5,4,4,3,4,4,5,3,4,4,5],[15,3,9,5,13,7,11,1,17,4,16,6,14,18,12,10,2,8]) },
-  { id: "rp-blue", name: "RiverPines", tee: "Blue", rating: 69.4, slope: 127, par: 70, holes: mk([4,4,3,4,3,4,4,5,4,4,4,4,4,3,4,3,5,4],[7,9,17,1,13,5,11,3,15,12,6,14,8,18,4,16,10,2]) },
-  { id: "chico-gold", name: "Chicopee Mill/Sch", tee: "Gold", rating: 72.7, slope: 135, par: 72, holes: mk([5,3,4,5,3,4,4,4,4,4,4,4,3,5,4,4,3,5],[17,15,11,7,3,1,13,5,9,4,16,12,18,10,2,8,14,6]) },
-  { id: "chico-blue", name: "Chicopee Mill/Sch", tee: "Blue", rating: 71.2, slope: 131, par: 72, holes: mk([5,3,4,5,3,4,4,4,4,4,4,4,3,5,4,4,3,5],[17,15,11,7,3,1,13,5,9,4,16,12,18,10,2,8,14,6]) },
-  { id: "chico-sm-gold", name: "Chicopee Sch/Mill", tee: "Gold", rating: 72.7, slope: 135, par: 72, holes: mk([4,4,4,3,5,4,4,3,5,5,3,4,5,3,4,4,4,4],[4,16,12,18,10,2,8,14,6,17,15,11,7,3,1,13,5,9]) },
-  { id: "chico-sm-blue", name: "Chicopee Sch/Mill", tee: "Blue", rating: 71.2, slope: 131, par: 72, holes: mk([4,4,4,3,5,4,4,3,5,5,3,4,5,3,4,4,4,4],[4,16,12,18,10,2,8,14,6,17,15,11,7,3,1,13,5,9]) },
-];
+/* ---------- live course source (golfcourseapi.com) ---------- */
+const API_BASE = "https://api.golfcourseapi.com/v1";
+const API_KEY = "Y2KP2ACTI2YKKBK5UAR244RBKA";
+const apiHeaders = { Authorization: `Bearer ${API_KEY}` };
+const courseCacheKey = (id) => `course_cache_${id}`;
+
+/* Call 1 — search. Returns the `courses` array (may include inline tee data). */
+async function searchCourses(query, signal) {
+  const r = await fetch(`${API_BASE}/search?search_query=${encodeURIComponent(query)}&fuzzy_match=true`, { headers: apiHeaders, signal });
+  if (!r.ok) throw new Error("search http " + r.status);
+  const data = await r.json();
+  return Array.isArray(data.courses) ? data.courses : [];
+}
+
+/* Call 2 — full course. Cache hit => no network. Miss => fetch + cache. Throws on failure. */
+async function loadFullCourse(id) {
+  try { const raw = localStorage.getItem(courseCacheKey(id)); if (raw) { const c = JSON.parse(raw); if (c && c.tees) return c; } } catch (e) { /* ignore */ }
+  const r = await fetch(`${API_BASE}/courses/${id}`, { headers: apiHeaders });
+  if (!r.ok) throw new Error("course http " + r.status);
+  const data = await r.json();
+  const course = data.course;
+  if (!course || !course.tees) throw new Error("bad course payload");
+  try { localStorage.setItem(courseCacheKey(id), JSON.stringify(course)); } catch (e) { /* quota */ }
+  return course;
+}
+
+/* Flatten tees.male + tees.female into one picker list; skip any non-18-hole tee. */
+function teeOptions(fullCourse) {
+  const tees = fullCourse.tees || {};
+  const out = [];
+  ["male", "female"].forEach(gender => {
+    const arr = Array.isArray(tees[gender]) ? tees[gender] : [];
+    arr.forEach((tee, i) => {
+      if (Array.isArray(tee.holes) && tee.holes.length === 18) out.push({ key: `${gender}:${i}`, gender, tee });
+    });
+  });
+  return out;
+}
+
+/* Build the engine course object from a full course + a chosen tee option.
+   Field mapping (do NOT rename): handicap->si, yardage->yards, course_rating->rating,
+   slope_rating->slope, par_total->par. */
+function buildCourse(fullCourse, teeOpt) {
+  const t = teeOpt.tee;
+  const name = fullCourse.club_name || fullCourse.course_name || "Course";
+  return {
+    id: `${fullCourse.id}:${teeOpt.key}`,
+    name,
+    tee: t.tee_name || teeOpt.gender,
+    rating: t.course_rating,
+    slope: t.slope_rating,
+    par: t.par_total,
+    holes: t.holes.map(h => ({ par: h.par, si: h.handicap, yards: h.yardage })),
+  };
+}
+
+/* Validate a persisted course object before restoring an in-progress round. */
+function validCourse(c) {
+  return !!c && Array.isArray(c.holes) && c.holes.length === 18 &&
+    c.holes.every(h => h && typeof h.par === "number" && typeof h.si === "number") &&
+    typeof c.rating === "number" && typeof c.slope === "number" && typeof c.par === "number";
+}
 
 /* engine (verified) — do not modify */
 function computeGhost(c, d) {
@@ -169,6 +213,7 @@ function buildRecord(base, course, diff, scores, ghost) {
     course: course.name, tee: course.tee, ratingSlope: `${course.rating}/${course.slope}`,
     differentialUsed: diff,
     holeScores: scores.slice(), ghostHoleScores: ghost.holes.slice(),
+    yardages: course.holes.map(h => typeof h.yards === "number" ? h.yards : null),
     yourOut, yourIn, yourTotal: m.total.yourTot, ghostTotal: ghost.gross,
     yourPoints, ghostPoints,
     result,
@@ -250,13 +295,51 @@ const marginAccent = (stats) => stats.n ? (stats.margin > 0 ? C.green : stats.ma
 const stepBtn = { width: 54, height: 54, borderRadius: 15, background: C.card2, color: C.ink, border: `1px solid ${C.line}`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 };
 const lbl = { color: C.sub, fontSize: 11, fontWeight: 800, letterSpacing: 1 };
 
-/* ---------- setup ---------- */
-function Setup({ courseId, setCourseId, diff, setDiff, stats, onStart, onHistory }) {
-  const c = COURSES.find(x => x.id === courseId);
-  const g = computeGhost(c, diff);
+/* ---------- setup (one screen: search course · pick tee · differential · start) ---------- */
+function Setup({ course, setCourse, diff, setDiff, stats, onStart, onHistory }) {
+  /* --- course search (golfcourseapi, debounced) --- */
+  const [query, setQuery] = useState("");
+  const [results, setResults] = useState([]);
+  const [searchState, setSearchState] = useState("idle"); // idle | loading | done | empty | error
+  const [open, setOpen] = useState(false);
+  const [selectedFull, setSelectedFull] = useState(null); // full course from Call 2
+  const [tees, setTees] = useState([]);                    // flattened tee options
+  const [teeKey, setTeeKey] = useState("");
+  const [loadState2, setLoadState2] = useState("idle");    // idle | loading | error
+  const [pendingId, setPendingId] = useState(null);        // id being loaded (for retry)
 
-  /* auto last-5 differential from Brett's published Sheet: cache-first, then
-     network, then manual. Never blocks the screen; override is this-round-only. */
+  useEffect(() => {
+    const q = query.trim();
+    if (q.length < 2) { setResults([]); setSearchState("idle"); return; }
+    const ctrl = new AbortController();
+    setSearchState("loading");
+    const t = setTimeout(() => {
+      searchCourses(q, ctrl.signal)
+        .then(cs => { setResults(cs.slice(0, 5)); setSearchState(cs.length ? "done" : "empty"); })
+        .catch(err => { if (err.name !== "AbortError") { setResults([]); setSearchState("error"); } });
+    }, 350);
+    return () => { clearTimeout(t); ctrl.abort(); };
+  }, [query]);
+
+  const pickCourse = (id) => {
+    setOpen(false);
+    setCourse(null); setTees([]); setTeeKey("");
+    setPendingId(id); setLoadState2("loading");
+    loadFullCourse(id)
+      .then(full => {
+        const opts = teeOptions(full);
+        setSelectedFull(full); setTees(opts); setLoadState2("idle");
+      })
+      .catch(() => { setSelectedFull(null); setTees([]); setLoadState2("error"); });
+  };
+  const pickTee = (key) => {
+    setTeeKey(key);
+    const opt = tees.find(o => o.key === key);
+    setCourse(opt && selectedFull ? buildCourse(selectedFull, opt) : null);
+  };
+
+  /* --- auto last-5 differential from Brett's published Sheet (v5, preserved) ---
+     cache-first, then network, then manual. Never blocks; override is this-round-only. */
   const [source, setSource] = useState("loading"); // loading | sheet | cache | manual | none
   const [asOf, setAsOf] = useState(null);
   const overridden = React.useRef(false);
@@ -293,20 +376,25 @@ function Setup({ courseId, setCourseId, diff, setDiff, stats, onStart, onHistory
     "No sync — set your last-5 differential manually";
   const srcColor = source === "sheet" ? C.green : source === "manual" ? C.ink : C.sub;
 
+  const g = course ? computeGhost(course, diff) : null;
+  const teeLabel = (o) => `${o.tee.tee_name || o.gender} · ${o.tee.course_rating}/${o.tee.slope_rating}${o.gender === "female" ? " (F)" : ""}`;
+  const inputStyle = { width: "100%", boxSizing: "border-box", padding: "12px 14px", borderRadius: 13, background: C.card, border: `1.5px solid ${C.line}`, color: C.ink, fontSize: 15, fontFamily: SANS, outline: "none" };
+
   return (
-    <div style={{ maxWidth: 460, margin: "0 auto", padding: "calc(env(safe-area-inset-top) + 14px) 18px 40px" }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 4 }}>
+    <div style={{ height: "100dvh", maxWidth: 460, margin: "0 auto", display: "flex", flexDirection: "column", padding: "calc(env(safe-area-inset-top) + 14px) 18px calc(env(safe-area-inset-bottom) + 14px)", overflow: "hidden" }}>
+      {/* header */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 12, flexShrink: 0 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <Target size={16} color={C.green} />
           <span style={{ color: C.sub, letterSpacing: 2.5, fontSize: 11, fontWeight: 800 }}>BOGEYMAN MATCHES</span>
         </div>
         <span style={{ color: C.sub, fontSize: 10, fontWeight: 700, ...tnum }}>{BUILD}</span>
       </div>
-      <h1 style={{ color: C.ink, fontSize: 28, fontWeight: 800, letterSpacing: -0.4, margin: "0 0 18px" }}>New ghost match</h1>
 
+      {/* record row (compact) */}
       {stats.n > 0 && (
-        <div style={{ marginBottom: 20 }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+        <div style={{ flexShrink: 0, marginBottom: 14 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
             <div style={lbl}>VS THE BOGEYMAN</div>
             <button onClick={onHistory} style={{ color: C.green, fontSize: 11, fontWeight: 800, letterSpacing: 0.5, background: "none", display: "flex", alignItems: "center", gap: 2 }}>HISTORY <ChevronRight size={13} /></button>
           </div>
@@ -318,41 +406,88 @@ function Setup({ courseId, setCourseId, diff, setDiff, stats, onStart, onHistory
         </div>
       )}
 
-      <div style={lbl}>COURSE</div>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, margin: "8px 0 22px" }}>
-        {COURSES.map(x => {
-          const on = x.id === courseId;
-          return (
-            <button key={x.id} onClick={() => setCourseId(x.id)} style={{ textAlign: "left", padding: "11px 12px", borderRadius: 13, background: on ? C.greenDim : C.card, border: `1.5px solid ${on ? C.green : C.line}`, color: C.ink }}>
-              <div style={{ fontWeight: 700, fontSize: 14, lineHeight: 1.1 }}>{x.name}</div>
-              <div style={{ color: C.sub, fontSize: 11, marginTop: 2, ...tnum }}>{x.tee} · {x.rating}/{x.slope}</div>
-            </button>
-          );
-        })}
-      </div>
+      {/* middle — scrolls internally so START never hides behind content */}
+      <div style={{ flex: 1, minHeight: 0, overflowY: "auto", display: "flex", flexDirection: "column", gap: 16 }}>
+        {/* course search */}
+        <div style={{ position: "relative" }}>
+          <div style={{ ...lbl, marginBottom: 8 }}>COURSE</div>
+          <input
+            value={query}
+            onChange={(e) => { setQuery(e.target.value); setOpen(true); }}
+            onFocus={() => { if (results.length) setOpen(true); }}
+            placeholder="Search for a course…"
+            autoCapitalize="words" autoCorrect="off" spellCheck={false}
+            style={inputStyle}
+          />
+          {/* results dropdown — absolutely positioned, overlays (never pushes START) */}
+          {open && query.trim().length >= 2 && (
+            <div style={{ position: "absolute", top: "100%", left: 0, right: 0, marginTop: 6, background: C.card2, border: `1px solid ${C.line}`, borderRadius: 13, overflow: "hidden", zIndex: 40, boxShadow: "0 12px 28px rgba(0,0,0,0.55)" }}>
+              {searchState === "loading" && <div style={{ padding: "12px 14px", color: C.sub, fontSize: 13 }}>Searching…</div>}
+              {searchState === "empty" && <div style={{ padding: "12px 14px", color: C.sub, fontSize: 13 }}>No courses found — try a different name or spelling.</div>}
+              {searchState === "error" && <div style={{ padding: "12px 14px", color: C.red, fontSize: 13 }}>Course search unavailable — check your connection.</div>}
+              {searchState === "done" && results.map(r => (
+                <button key={r.id} onClick={() => pickCourse(r.id)} style={{ display: "block", width: "100%", textAlign: "left", padding: "10px 14px", background: "none", color: C.ink, borderBottom: `1px solid ${C.line}` }}>
+                  <div style={{ fontWeight: 700, fontSize: 14, lineHeight: 1.15 }}>{r.club_name || r.course_name}</div>
+                  <div style={{ color: C.sub, fontSize: 11, marginTop: 1 }}>
+                    {[r.course_name && r.course_name !== r.club_name ? r.course_name : null, r.location && [r.location.city, r.location.state].filter(Boolean).join(", ")].filter(Boolean).join(" · ")}
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
 
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        <div style={lbl}>YOUR LAST-5 DIFFERENTIAL</div>
-        {source === "manual" && (
-          <button onClick={syncDiff} style={{ color: C.green, fontSize: 11, fontWeight: 800, letterSpacing: 0.5, background: "none" }}>USE SHEET</button>
+        {/* tee picker — only after Call 2 resolves; retry on failure */}
+        {loadState2 === "loading" && <div style={{ color: C.sub, fontSize: 13 }}>Loading course data…</div>}
+        {loadState2 === "error" && (
+          <button onClick={() => pendingId && pickCourse(pendingId)} style={{ textAlign: "left", color: C.red, fontSize: 13, fontWeight: 600, background: "none" }}>Couldn't load course data — tap to retry.</button>
+        )}
+        {loadState2 === "idle" && selectedFull && (
+          <div>
+            <div style={{ ...lbl, marginBottom: 8 }}>TEE — {selectedFull.club_name || selectedFull.course_name}</div>
+            {tees.length === 0 ? (
+              <div style={{ color: C.sub, fontSize: 13 }}>No 18-hole tees available for this course.</div>
+            ) : (
+              <select value={teeKey} onChange={(e) => pickTee(e.target.value)} style={{ ...inputStyle, appearance: "none", WebkitAppearance: "none" }}>
+                <option value="">Select tee…</option>
+                {tees.map(o => <option key={o.key} value={o.key}>{teeLabel(o)}</option>)}
+              </select>
+            )}
+          </div>
+        )}
+
+        {/* differential (v5 block, reused) */}
+        <div>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <div style={lbl}>YOUR LAST-5 DIFFERENTIAL</div>
+            {source === "manual" && (
+              <button onClick={syncDiff} style={{ color: C.green, fontSize: 11, fontWeight: 800, letterSpacing: 0.5, background: "none" }}>USE SHEET</button>
+            )}
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 12, margin: "8px 0 4px" }}>
+            <button onClick={() => bumpDiff(-0.1)} style={stepBtn}><Minus size={20} /></button>
+            <div style={{ flex: 1, textAlign: "center", fontFamily: NUM, fontSize: 34, fontWeight: 800, color: C.green, ...tnum }}>{diff.toFixed(1)}</div>
+            <button onClick={() => bumpDiff(0.1)} style={stepBtn}><Plus size={20} /></button>
+          </div>
+          <div style={{ color: srcColor, fontSize: 11, fontWeight: 600, ...tnum }}>{srcLine}</div>
+        </div>
+
+        {/* ghost preview — only when course + tee resolved */}
+        {g && (
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: C.card, borderRadius: 18, border: `1px solid ${C.line}`, padding: "14px 18px" }}>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ color: C.ink, fontWeight: 700, fontSize: 14, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{course.name}<span style={{ color: C.sub, fontWeight: 600 }}> · {course.tee}</span></div>
+              <div style={{ color: C.sub, fontSize: 11, marginTop: 3, ...tnum }}>Ghost plays to {g.hcp} · par {course.par} · {course.rating}/{course.slope}</div>
+            </div>
+            <GhostRing value={g.gross} size={58} />
+          </div>
         )}
       </div>
-      <div style={{ display: "flex", alignItems: "center", gap: 12, margin: "8px 0 4px" }}>
-        <button onClick={() => bumpDiff(-0.1)} style={stepBtn}><Minus size={20} /></button>
-        <div style={{ flex: 1, textAlign: "center", fontFamily: NUM, fontSize: 34, fontWeight: 800, color: C.green, ...tnum }}>{diff.toFixed(1)}</div>
-        <button onClick={() => bumpDiff(0.1)} style={stepBtn}><Plus size={20} /></button>
-      </div>
-      <div style={{ color: srcColor, fontSize: 11, fontWeight: 600, margin: "0 0 24px", ...tnum }}>{srcLine}</div>
 
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: C.card, borderRadius: 18, border: `1px solid ${C.line}`, padding: "14px 18px", marginBottom: 24 }}>
-        <div>
-          <div style={{ color: C.sub, fontSize: 12, fontWeight: 600 }}>The ghost plays to</div>
-          <div style={{ color: C.sub, fontSize: 11, marginTop: 3, ...tnum }}>{g.hcp} strokes · {g.hcp} hardest holes · par {c.par}</div>
-        </div>
-        <GhostRing value={g.gross} size={58} />
-      </div>
-
-      <button onClick={onStart} style={{ width: "100%", padding: "15px 0", background: C.green, color: "#07140C", borderRadius: 16, fontSize: 16, fontWeight: 800, letterSpacing: 0.3 }}>Start round</button>
+      {/* start — pinned */}
+      <button onClick={onStart} disabled={!course} style={{ flexShrink: 0, marginTop: 14, width: "100%", padding: "15px 0", background: course ? C.green : C.card2, color: course ? "#07140C" : C.sub, border: course ? "none" : `1px solid ${C.line}`, borderRadius: 16, fontSize: 16, fontWeight: 800, letterSpacing: 0.3 }}>
+        {course ? "Start round" : "Select a course & tee"}
+      </button>
     </div>
   );
 }
@@ -701,20 +836,23 @@ function History({ history, stats, onDelete, onBack }) {
 /* ---------- localStorage persistence ---------- */
 const LS_KEY = "bogeyman-matches:v1";
 const HIST_KEY = "bogeyman-matches:history:v1";
-const DEFAULT_STATE = { screen: "setup", courseId: "rp-black", diff: 7.9, scores: Array(18).fill(null), hole: 0, roundId: null };
+const DEFAULT_STATE = { screen: "setup", course: null, diff: 7.9, scores: Array(18).fill(null), hole: 0, roundId: null };
 function loadState() {
   try {
     const raw = localStorage.getItem(LS_KEY);
     if (!raw) return DEFAULT_STATE;
     const s = JSON.parse(raw);
     if (!s || typeof s !== "object") return DEFAULT_STATE;
-    if (!COURSES.find(c => c.id === s.courseId)) return DEFAULT_STATE;
-    if (!Array.isArray(s.scores) || s.scores.length !== 18) return DEFAULT_STATE;
+    const course = validCourse(s.course) ? s.course : null;
+    const scoresOk = Array.isArray(s.scores) && s.scores.length === 18;
+    const scores = scoresOk ? s.scores.map(v => (typeof v === "number" && v > 0 ? v : null)) : Array(18).fill(null);
+    // Only restore an in-progress round when we have a valid course AND valid scores.
+    const wantResume = (s.screen === "play" || s.screen === "summary") && course && scoresOk;
     return {
-      screen: s.screen === "play" || s.screen === "summary" || s.screen === "setup" ? s.screen : "setup",
-      courseId: s.courseId,
+      screen: wantResume ? s.screen : "setup",
+      course,
       diff: typeof s.diff === "number" ? s.diff : 7.9,
-      scores: s.scores.map(v => (typeof v === "number" && v > 0 ? v : null)),
+      scores,
       hole: Number.isInteger(s.hole) && s.hole >= 0 && s.hole < 18 ? s.hole : 0,
       roundId: typeof s.roundId === "string" ? s.roundId : null,
     };
@@ -741,18 +879,17 @@ function saveHistory(h) {
 function App() {
   const initial = loadState();
   const [screen, setScreen] = useState(initial.screen);
-  const [courseId, setCourseId] = useState(initial.courseId);
+  const [course, setCourse] = useState(initial.course);
   const [diff, setDiff] = useState(initial.diff);
   const [scores, setScores] = useState(initial.scores);
   const [hole, setHole] = useState(initial.hole);
   const [roundId, setRoundId] = useState(initial.roundId);
   const [history, setHistory] = useState(loadHistory());
-  useEffect(() => { saveState({ screen, courseId, diff, scores, hole, roundId }); }, [screen, courseId, diff, scores, hole, roundId]);
+  useEffect(() => { saveState({ screen, course, diff, scores, hole, roundId }); }, [screen, course, diff, scores, hole, roundId]);
   useEffect(() => { saveHistory(history); }, [history]);
-  const course = COURSES.find(c => c.id === courseId);
-  const ghost = useMemo(() => computeGhost(course, diff), [course, diff]);
+  const ghost = useMemo(() => course ? computeGhost(course, diff) : null, [course, diff]);
   const stats = useMemo(() => deriveStats(history), [history]);
-  const start = () => { setScores(Array(18).fill(null)); setHole(0); setRoundId(null); setScreen("play"); };
+  const start = () => { if (!course) return; setScores(Array(18).fill(null)); setHole(0); setRoundId(null); setScreen("play"); };
   // Finalize: persist the finished round, then a soft (editable) transition to summary.
   const finalize = (finalScores) => {
     const rec = buildRecord({ id: newId(), date: nowISO() }, course, diff, finalScores, ghost);
@@ -772,9 +909,9 @@ function App() {
   return (
     <div style={{ minHeight: "100dvh", background: C.bg, color: C.ink, fontFamily: SANS }}>
       <style dangerouslySetInnerHTML={{ __html: RESET }} />
-      {screen === "setup" && <Setup courseId={courseId} setCourseId={setCourseId} diff={diff} setDiff={setDiff} stats={stats} onStart={start} onHistory={() => setScreen("history")} />}
-      {screen === "play" && <Play course={course} ghost={ghost} scores={scores} setScores={setScores} hole={hole} setHole={setHole} onFinish={finalize} />}
-      {screen === "summary" && <Summary course={course} ghost={ghost} scores={scores} history={history} onEditScore={editScore} onReset={reset} />}
+      {screen === "setup" && <Setup course={course} setCourse={setCourse} diff={diff} setDiff={setDiff} stats={stats} onStart={start} onHistory={() => setScreen("history")} />}
+      {screen === "play" && course && ghost && <Play course={course} ghost={ghost} scores={scores} setScores={setScores} hole={hole} setHole={setHole} onFinish={finalize} />}
+      {screen === "summary" && course && ghost && <Summary course={course} ghost={ghost} scores={scores} history={history} onEditScore={editScore} onReset={reset} />}
       {screen === "history" && <History history={history} stats={stats} onDelete={deleteRound} onBack={() => setScreen("setup")} />}
     </div>
   );

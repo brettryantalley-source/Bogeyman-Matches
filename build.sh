@@ -1,17 +1,28 @@
 #!/usr/bin/env bash
 # Rebuild index.html from src/app.jsx.
-# Requires: esbuild (brew install esbuild), curl, python3 + PIL.
+# Requires: esbuild (brew install esbuild) OR npx (falls back to `npx esbuild`), curl, python3.
 set -euo pipefail
 cd "$(dirname "$0")"
 
 mkdir -p build
+
+# Resolve esbuild: prefer a globally installed binary, else fall back to npx.
+if command -v esbuild >/dev/null 2>&1; then
+  ESBUILD=(esbuild)
+elif command -v npx >/dev/null 2>&1; then
+  echo "esbuild not on PATH — using 'npx --yes esbuild'."
+  ESBUILD=(npx --yes esbuild)
+else
+  echo "ERROR: neither 'esbuild' nor 'npx' found. Install esbuild (brew install esbuild) or Node/npx." >&2
+  exit 1
+fi
 
 # 1. Fetch React UMD builds if missing.
 [ -f build/react.min.js ]     || curl -sSLo build/react.min.js     https://unpkg.com/react@18.3.1/umd/react.production.min.js
 [ -f build/react-dom.min.js ] || curl -sSLo build/react-dom.min.js https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js
 
 # 2. Bundle app.
-esbuild src/app.jsx \
+"${ESBUILD[@]}" src/app.jsx \
   --loader:.jsx=jsx --jsx=transform \
   --bundle --minify --format=iife --target=es2018 \
   --outfile=build/app.min.js
