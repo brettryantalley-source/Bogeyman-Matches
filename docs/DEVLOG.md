@@ -47,12 +47,37 @@ differential still auto-pulls (6.9 from Sheet) · manual override + USE SHEET in
 record `1–0–0 · W1 · +8.0` + History/delete intact · build tag `v6 · Jul 20`, sw cache
 `bogeyman-matches-v6` · no old course library · one screen, START pinned.
 
-## Next — Phase 2 (design with Brett; don't build blindly)
-Stay a simple hosted PWA (no backend) while finishing the app. Two durable goals to
-design toward: (1) **durable stats** — round history + record must survive a browser
-cache wipe (today localStorage-only); (2) **friends on their own phones** — per-person
-records via a light identity (name / per-device id), not password accounts. Candidate
-low-friction backends to weigh (pick one): Supabase/Firebase, Cloudflare Workers +
-KV/D1, or a Google Apps Script appending rounds to a Sheet. Keep any migration
-additive — localStorage stays as an offline cache, cloud layers on top. Details in
-`HANDOFF.md`.
+## Field-test watch-list — first real round on v6 (report back what broke)
+v6 was verified in a desktop browser at phone size with the live API — NOT yet on
+Brett's phone, on cellular, at a course, mid-round. On the first real round, watch:
+- [ ] **Course search finds the actual course** you're playing (try the real name/spelling).
+- [ ] **The tee you play is in the picker**, and its **rating / slope / stroke index look
+      correct** — a wrong stroke index silently skews the ghost. Sanity-check the ghost's
+      "plays to" number against expectation.
+- [ ] **Signal at the first tee.** v6's course search REQUIRES connectivity the first
+      time a course is loaded (it caches after). See the top next-step below.
+- [ ] **Differential** still auto-pulls from the Sheet (6.9-ish) with the source label.
+- [ ] **50/day API cap** — if search ever just errors, this may be why.
+- [ ] Full round → **Finalize → scorecard yardage row** shows; **record/History** update.
+
+## Next steps (suggested order)
+1. **Offline "recently played courses" quick-pick (top functional gap).** v6's course
+   search needs a connection to find a course the first time — but the app's whole
+   premise is "runs at the first tee, often no signal." Add a quick-pick of
+   cached/recent courses (from `course_cache_{id}`) so Brett can tee off offline on any
+   course he's loaded before.
+2. **Durable stats (Phase 2).** History + record are localStorage-only today — a cache
+   wipe / reinstall / new phone erases them. Add a lightweight cloud datastore; keep it
+   additive (localStorage stays as the offline cache, cloud layers on top).
+3. **Friends on their own phones (Phase 2).** Per-person records via a light identity
+   (name / per-device id), NOT password accounts, so friends' histories don't mix.
+4. **Sheet write-back.** Deferred since v5 — the app reads the differential from the
+   Sheet but never writes finished rounds back; unifying them keeps everything in Brett's
+   Sheets ecosystem.
+5. **Polish / untested edges:** force Call-2 failure/retry; a course with no valid
+   18-hole tees; one-tee courses; an in-app way to correct a bad tee's stroke index/
+   rating; a clearer "change course" affordance after New round.
+
+Phase 2 stays "simple hosted PWA, no backend" until the app is finished. Candidate
+low-friction backends to weigh later (pick one): Supabase/Firebase, Cloudflare Workers +
+KV/D1, or a Google Apps Script appending rounds to a Sheet. Details in `HANDOFF.md`.
