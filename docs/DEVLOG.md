@@ -1,6 +1,6 @@
 # Bogeyman Matches — Development Log
 
-**Log revision:** v3 · **current through app build:** v6 (commit `147fc7b`)
+**Log revision:** v3 · **current through app build:** v7 (commit `d2a5305`)
 **Live:** https://brettryantalley-source.github.io/Bogeyman-Matches/ · **Repo:** brettryantalley-source/Bogeyman-Matches
 
 A self-contained single-page golf side-game PWA (React UMD, no framework), deployed
@@ -30,6 +30,7 @@ earlier commits predate the counter.
 
 | Build | Commit | Date | What shipped |
 |-------|--------|------|--------------|
+| v7 | `d2a5305` | Jul 26 | **Display quarter-points faithfully.** A tied nine splits 0.5 → 0.25 each, so match points can land on quarters; `fmtPts` had rounded to one decimal (2.25/5.75 shown as 2.3/5.8, appearing to sum to 8.1). Now prints up to 2 decimals, trailing zeros trimmed. Display-only — `evalMatch`/`computeGhost` untouched; scoring unchanged (0.5/nine, 1/total). First real on-course round (Sugar Creek GC, v6) surfaced this. |
 | v6 | `147fc7b` | Jul 20 | **Live golfcourseapi.com course search** replaces the hardcoded 14-course library (debounced search, per-course caching, male/female tee picker skipping non-18-hole tees, spec'd error states). **One-screen Setup** (START pinned, never behind a scroll). Per-hole yardage stored in rounds → scorecard yardage row. sw.js same-origin guard so live API/CSV never serve stale from cache; build.sh npx-esbuild fallback. |
 | v5 | `0ed33dc` | Jul 18 | **Auto last-5 differential** from Brett's published Google Sheet CSV (read-only): cache-first → network → manual fallback, source/as-of label, per-round manual override with USE SHEET revert. Fed into the existing `diff`; write-back deferred to Phase 2. |
 | v4 | `03a60e9` | Jul 18 | Docs: require bumping the on-screen build tag in sync with the sw cache on every user-facing deploy. |
