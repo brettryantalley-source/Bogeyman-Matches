@@ -21,7 +21,7 @@ const Target = (p) => <Icon {...p}><circle cx="12" cy="12" r="10" /><circle cx="
 const Trash = (p) => <Icon {...p}><polyline points="3 6 5 6 21 6" /><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" /><line x1="10" y1="11" x2="10" y2="17" /><line x1="14" y1="11" x2="14" y2="17" /><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" /></Icon>;
 
 /* build tag — bump alongside the sw.js cache version so a deploy is confirmable on-screen */
-const BUILD = "v6 · Jul 20";
+const BUILD = "v7 · Jul 26";
 
 /* palette — Shot Pattern dark */
 const C = {
@@ -142,7 +142,10 @@ function evalMatch(scores, ghost) {
   return { you, opp, segs, front, back, total: { res: totRes, yourTot, ghostTot, liveMargin } };
 }
 const scoreName = (s, par) => { const d = s - par; return d <= -3 ? "albatross" : d === -2 ? "eagle" : d === -1 ? "birdie" : d === 0 ? "par" : d === 1 ? "bogey" : d === 2 ? "double" : d === 3 ? "triple" : `+${d}`; };
-const fmtPts = (n) => Number.isInteger(n) ? `${n}` : n.toFixed(1);
+// Points come in quarter increments (a tied nine splits 0.5 -> 0.25 each).
+// Print them faithfully: integers plain, else up to 2 decimals with trailing zeros
+// trimmed (2 -> "2", 2.5 -> "2.5", 2.25 -> "2.25", 5.75 -> "5.75"). Never round a quarter away.
+const fmtPts = (n) => Number.isInteger(n) ? `${n}` : n.toFixed(2).replace(/\.?0+$/, "");
 const marginText = (m) => m === 0 ? "AS" : m < 0 ? `${-m}↑` : `${m}↓`;
 
 /* ---------- Google Sheet auto last-5 differential (read-only; write-back deferred) ---------- */
