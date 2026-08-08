@@ -42,12 +42,12 @@ html = f"""<!doctype html>
 <meta name="theme-color" content="#000000" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-<meta name="apple-mobile-web-app-title" content="Bogeyman" />
+<meta name="apple-mobile-web-app-title" content="Ghost" />
 <meta name="mobile-web-app-capable" content="yes" />
 <link rel="manifest" href="./manifest.webmanifest" />
 <link rel="apple-touch-icon" href="./icon-512.png" />
 <link rel="icon" type="image/png" sizes="512x512" href="./icon-512.png" />
-<title>Bogeyman Matches</title>
+<title>Ghost Match</title>
 <style>
 html,body{{margin:0;background:#000;color:#fff;overscroll-behavior:none}}
 body{{font-family:-apple-system,ui-sans-serif,'SF Pro Text',system-ui,sans-serif}}
@@ -62,7 +62,7 @@ body{{font-family:-apple-system,ui-sans-serif,'SF Pro Text',system-ui,sans-serif
 <script>/* ReactDOM 18 UMD (production) */
 {react_dom}
 </script>
-<script>/* Bogeyman Matches app bundle */
+<script>/* Ghost Match app bundle */
 {app}
 </script>
 <script>

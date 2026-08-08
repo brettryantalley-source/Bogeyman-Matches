@@ -1,6 +1,6 @@
 {
-  "name": "Bogeyman Matches",
-  "short_name": "Bogeyman",
+  "name": "Ghost Match",
+  "short_name": "Ghost",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

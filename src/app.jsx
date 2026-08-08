@@ -19,9 +19,11 @@ const Flag = (p) => <Icon {...p}><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4
 const RotateCcw = (p) => <Icon {...p}><polyline points="1 4 1 10 7 10" /><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" /></Icon>;
 const Target = (p) => <Icon {...p}><circle cx="12" cy="12" r="10" /><circle cx="12" cy="12" r="6" /><circle cx="12" cy="12" r="2" /></Icon>;
 const Trash = (p) => <Icon {...p}><polyline points="3 6 5 6 21 6" /><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" /><line x1="10" y1="11" x2="10" y2="17" /><line x1="14" y1="11" x2="14" y2="17" /><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" /></Icon>;
+const Clock = (p) => <Icon {...p}><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></Icon>;
+const MapPin = (p) => <Icon {...p}><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" /><circle cx="12" cy="10" r="3" /></Icon>;
 
 /* build tag — bump alongside the sw.js cache version so a deploy is confirmable on-screen */
-const BUILD = "v7 · Jul 26";
+const BUILD = "v8 · Aug 4";
 
 /* palette — Shot Pattern dark */
 const C = {
@@ -99,6 +101,14 @@ function validCourse(c) {
     c.holes.every(h => h && typeof h.par === "number" && typeof h.si === "number") &&
     typeof c.rating === "number" && typeof c.slope === "number" && typeof c.par === "number";
 }
+
+/* ---------- home-state filter (results have state; the API has no geo/coords) ---------- */
+const HOME_STATE_KEY = "bogeyman-matches:home-state";
+const GEO_URL = "https://api-bdc.io/data/reverse-geocode-client"; // free, no key, CORS-open reverse geocode
+const US_STATES = [
+  {c:"AL",n:"Alabama"},{c:"AK",n:"Alaska"},{c:"AZ",n:"Arizona"},{c:"AR",n:"Arkansas"},{c:"CA",n:"California"},{c:"CO",n:"Colorado"},{c:"CT",n:"Connecticut"},{c:"DE",n:"Delaware"},{c:"DC",n:"District of Columbia"},{c:"FL",n:"Florida"},{c:"GA",n:"Georgia"},{c:"HI",n:"Hawaii"},{c:"ID",n:"Idaho"},{c:"IL",n:"Illinois"},{c:"IN",n:"Indiana"},{c:"IA",n:"Iowa"},{c:"KS",n:"Kansas"},{c:"KY",n:"Kentucky"},{c:"LA",n:"Louisiana"},{c:"ME",n:"Maine"},{c:"MD",n:"Maryland"},{c:"MA",n:"Massachusetts"},{c:"MI",n:"Michigan"},{c:"MN",n:"Minnesota"},{c:"MS",n:"Mississippi"},{c:"MO",n:"Missouri"},{c:"MT",n:"Montana"},{c:"NE",n:"Nebraska"},{c:"NV",n:"Nevada"},{c:"NH",n:"New Hampshire"},{c:"NJ",n:"New Jersey"},{c:"NM",n:"New Mexico"},{c:"NY",n:"New York"},{c:"NC",n:"North Carolina"},{c:"ND",n:"North Dakota"},{c:"OH",n:"Ohio"},{c:"OK",n:"Oklahoma"},{c:"OR",n:"Oregon"},{c:"PA",n:"Pennsylvania"},{c:"RI",n:"Rhode Island"},{c:"SC",n:"South Carolina"},{c:"SD",n:"South Dakota"},{c:"TN",n:"Tennessee"},{c:"TX",n:"Texas"},{c:"UT",n:"Utah"},{c:"VT",n:"Vermont"},{c:"VA",n:"Virginia"},{c:"WA",n:"Washington"},{c:"WV",n:"West Virginia"},{c:"WI",n:"Wisconsin"},{c:"WY",n:"Wyoming"},
+];
+const STATE_SET = new Set(US_STATES.map(s => s.c));
 
 /* engine (verified) — do not modify */
 function computeGhost(c, d) {
@@ -302,7 +312,7 @@ const lbl = { color: C.sub, fontSize: 11, fontWeight: 800, letterSpacing: 1 };
 function Setup({ course, setCourse, diff, setDiff, stats, onStart, onHistory }) {
   /* --- course search (golfcourseapi, debounced) --- */
   const [query, setQuery] = useState("");
-  const [results, setResults] = useState([]);
+  const [results, setResults] = useState([]);              // raw API results (up to 40)
   const [searchState, setSearchState] = useState("idle"); // idle | loading | done | empty | error
   const [open, setOpen] = useState(false);
   const [selectedFull, setSelectedFull] = useState(null); // full course from Call 2
@@ -311,6 +321,40 @@ function Setup({ course, setCourse, diff, setDiff, stats, onStart, onHistory }) 
   const [loadState2, setLoadState2] = useState("idle");    // idle | loading | error
   const [pendingId, setPendingId] = useState(null);        // id being loaded (for retry)
 
+  /* home state: sort in-state courses first (the API has no coords, so no true "near me") */
+  const [homeState, setHomeState] = useState(() => { try { return localStorage.getItem(HOME_STATE_KEY) || ""; } catch (e) { return ""; } });
+  const [locating, setLocating] = useState(false);
+  const [locMsg, setLocMsg] = useState("");
+  const saveHomeState = (s) => { setHomeState(s); setLocMsg(""); try { s ? localStorage.setItem(HOME_STATE_KEY, s) : localStorage.removeItem(HOME_STATE_KEY); } catch (e) { /* quota */ } };
+  const detectState = () => {
+    if (!navigator.geolocation) { setLocMsg("Location isn't available — pick your state."); return; }
+    setLocating(true); setLocMsg("");
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        fetch(`${GEO_URL}?latitude=${pos.coords.latitude}&longitude=${pos.coords.longitude}&localityLanguage=en`)
+          .then(r => r.ok ? r.json() : Promise.reject(new Error("http " + r.status)))
+          .then(d => {
+            const code = String(d.principalSubdivisionCode || "").split("-").pop();
+            if (d.countryCode === "US" && STATE_SET.has(code)) saveHomeState(code);
+            else setLocMsg("Couldn't match your state — pick it below.");
+          })
+          .catch(() => setLocMsg("Location lookup failed — pick your state."))
+          .finally(() => setLocating(false));
+      },
+      () => { setLocating(false); setLocMsg("Location off or denied — pick your state."); },
+      { timeout: 8000, maximumAge: 300000 }
+    );
+  };
+  const CAP = 12;
+  const stateOf = (r) => (r.location && r.location.state) || "";
+  const displayed = useMemo(() => {
+    if (!homeState) return results.slice(0, CAP);
+    const inState = results.filter(r => stateOf(r) === homeState);
+    const rest = results.filter(r => stateOf(r) !== homeState);
+    return [...inState, ...rest].slice(0, CAP);
+  }, [results, homeState]);
+  const more = results.length > CAP;
+
   useEffect(() => {
     const q = query.trim();
     if (q.length < 2) { setResults([]); setSearchState("idle"); return; }
@@ -318,7 +362,7 @@ function Setup({ course, setCourse, diff, setDiff, stats, onStart, onHistory }) 
     setSearchState("loading");
     const t = setTimeout(() => {
       searchCourses(q, ctrl.signal)
-        .then(cs => { setResults(cs.slice(0, 5)); setSearchState(cs.length ? "done" : "empty"); })
+        .then(cs => { setResults(cs.slice(0, 40)); setSearchState(cs.length ? "done" : "empty"); })
         .catch(err => { if (err.name !== "AbortError") { setResults([]); setSearchState("error"); } });
     }, 350);
     return () => { clearTimeout(t); ctrl.abort(); };
@@ -389,18 +433,15 @@ function Setup({ course, setCourse, diff, setDiff, stats, onStart, onHistory }) 
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 12, flexShrink: 0 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <Target size={16} color={C.green} />
-          <span style={{ color: C.sub, letterSpacing: 2.5, fontSize: 11, fontWeight: 800 }}>BOGEYMAN MATCHES</span>
+          <span style={{ color: C.sub, letterSpacing: 2.5, fontSize: 11, fontWeight: 800 }}>GHOST MATCH</span>
         </div>
         <span style={{ color: C.sub, fontSize: 10, fontWeight: 700, ...tnum }}>{BUILD}</span>
       </div>
 
       {/* record row (compact) */}
       {stats.n > 0 && (
-        <div style={{ flexShrink: 0, marginBottom: 14 }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
-            <div style={lbl}>VS THE BOGEYMAN</div>
-            <button onClick={onHistory} style={{ color: C.green, fontSize: 11, fontWeight: 800, letterSpacing: 0.5, background: "none", display: "flex", alignItems: "center", gap: 2 }}>HISTORY <ChevronRight size={13} /></button>
-          </div>
+        <div style={{ flexShrink: 0, marginBottom: 10 }}>
+          <div style={{ ...lbl, marginBottom: 6 }}>VS THE GHOST</div>
           <div style={{ display: "flex", gap: 8 }}>
             <MiniStat label="RECORD" value={stats.recordText} />
             <MiniStat label="STREAK" value={stats.streakText} accent={streakAccent(stats)} />
@@ -409,11 +450,33 @@ function Setup({ course, setCourse, diff, setDiff, stats, onStart, onHistory }) 
         </div>
       )}
 
+      {/* round history — always available on the main menu; opens the delete-capable list */}
+      <button onClick={onHistory} style={{ flexShrink: 0, marginBottom: 14, width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 16px", borderRadius: 13, background: C.card, border: `1px solid ${C.line}`, color: C.ink }}>
+        <span style={{ display: "flex", alignItems: "center", gap: 9, fontSize: 14, fontWeight: 700 }}>
+          <Clock size={17} color={C.sub} /> Round history
+        </span>
+        <span style={{ display: "flex", alignItems: "center", gap: 4, color: C.sub, fontSize: 12, fontWeight: 700, ...tnum }}>
+          {stats.n} {stats.n === 1 ? "round" : "rounds"} <ChevronRight size={15} />
+        </span>
+      </button>
+
       {/* middle — scrolls internally so START never hides behind content */}
       <div style={{ flex: 1, minHeight: 0, overflowY: "auto", display: "flex", flexDirection: "column", gap: 16 }}>
         {/* course search */}
         <div style={{ position: "relative" }}>
-          <div style={{ ...lbl, marginBottom: 8 }}>COURSE</div>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8, gap: 8 }}>
+            <div style={lbl}>COURSE</div>
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <button onClick={detectState} disabled={locating} aria-label="Use my location" style={{ width: 30, height: 30, borderRadius: 8, background: C.card2, border: `1px solid ${C.line}`, display: "flex", alignItems: "center", justifyContent: "center", opacity: locating ? 0.6 : 1 }}>
+                <MapPin size={15} color={locating ? C.green : C.sub} />
+              </button>
+              <select value={homeState} onChange={(e) => saveHomeState(e.target.value)} aria-label="Home state" style={{ appearance: "none", WebkitAppearance: "none", background: C.card2, color: homeState ? C.ink : C.sub, border: `1px solid ${homeState ? C.green : C.line}`, borderRadius: 8, padding: "6px 10px", fontSize: 12, fontWeight: 700, fontFamily: SANS, maxWidth: 150 }}>
+                <option value="">All states</option>
+                {US_STATES.map(s => <option key={s.c} value={s.c}>{s.n}</option>)}
+              </select>
+            </div>
+          </div>
+          {locMsg && <div style={{ color: C.sub, fontSize: 11, marginBottom: 8 }}>{locMsg}</div>}
           <input
             value={query}
             onChange={(e) => { setQuery(e.target.value); setOpen(true); }}
@@ -424,18 +487,26 @@ function Setup({ course, setCourse, diff, setDiff, stats, onStart, onHistory }) 
           />
           {/* results dropdown — absolutely positioned, overlays (never pushes START) */}
           {open && query.trim().length >= 2 && (
-            <div style={{ position: "absolute", top: "100%", left: 0, right: 0, marginTop: 6, background: C.card2, border: `1px solid ${C.line}`, borderRadius: 13, overflow: "hidden", zIndex: 40, boxShadow: "0 12px 28px rgba(0,0,0,0.55)" }}>
+            <div style={{ position: "absolute", top: "100%", left: 0, right: 0, marginTop: 6, background: C.card2, border: `1px solid ${C.line}`, borderRadius: 13, overflowY: "auto", maxHeight: "min(58vh, 460px)", WebkitOverflowScrolling: "touch", zIndex: 40, boxShadow: "0 12px 28px rgba(0,0,0,0.55)" }}>
               {searchState === "loading" && <div style={{ padding: "12px 14px", color: C.sub, fontSize: 13 }}>Searching…</div>}
               {searchState === "empty" && <div style={{ padding: "12px 14px", color: C.sub, fontSize: 13 }}>No courses found — try a different name or spelling.</div>}
               {searchState === "error" && <div style={{ padding: "12px 14px", color: C.red, fontSize: 13 }}>Course search unavailable — check your connection.</div>}
-              {searchState === "done" && results.map(r => (
-                <button key={r.id} onClick={() => pickCourse(r.id)} style={{ display: "block", width: "100%", textAlign: "left", padding: "10px 14px", background: "none", color: C.ink, borderBottom: `1px solid ${C.line}` }}>
-                  <div style={{ fontWeight: 700, fontSize: 14, lineHeight: 1.15 }}>{r.club_name || r.course_name}</div>
-                  <div style={{ color: C.sub, fontSize: 11, marginTop: 1 }}>
-                    {[r.course_name && r.course_name !== r.club_name ? r.course_name : null, r.location && [r.location.city, r.location.state].filter(Boolean).join(", ")].filter(Boolean).join(" · ")}
-                  </div>
-                </button>
-              ))}
+              {searchState === "done" && displayed.map(r => {
+                const outState = homeState && stateOf(r) !== homeState;
+                return (
+                  <button key={r.id} onClick={() => pickCourse(r.id)} style={{ display: "block", width: "100%", textAlign: "left", padding: "10px 14px", background: "none", color: C.ink, borderBottom: `1px solid ${C.line}`, opacity: outState ? 0.5 : 1 }}>
+                    <div style={{ fontWeight: 700, fontSize: 14, lineHeight: 1.15 }}>{r.club_name || r.course_name}</div>
+                    <div style={{ color: C.sub, fontSize: 11, marginTop: 1 }}>
+                      {[r.course_name && r.course_name !== r.club_name ? r.course_name : null, r.location && [r.location.city, r.location.state].filter(Boolean).join(", ")].filter(Boolean).join(" · ")}
+                    </div>
+                  </button>
+                );
+              })}
+              {searchState === "done" && more && (
+                <div style={{ padding: "9px 14px", color: C.sub, fontSize: 11, textAlign: "center", borderTop: `1px solid ${C.line}`, background: C.card }}>
+                  Showing top 12 — type more of the name to narrow.
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -749,9 +820,9 @@ function Summary({ course, ghost, scores, history, onEditScore, onReset }) {
       <ScoreCard course={course} ghost={ghost} scores={scores} m={m} onTapHole={openEdit} />
       <div style={{ textAlign: "center", color: C.sub, fontSize: 11, marginTop: 8 }}>Tap any hole in your row to edit</div>
 
-      {/* record vs the Bogeyman (updates live as you edit) */}
+      {/* record vs the Ghost (updates live as you edit) */}
       <div style={{ marginTop: 22 }}>
-        <div style={{ ...lbl, marginBottom: 8 }}>VS THE BOGEYMAN</div>
+        <div style={{ ...lbl, marginBottom: 8 }}>VS THE GHOST</div>
         <div style={{ display: "flex", gap: 8 }}>
           <MiniStat label="RECORD" value={stats.recordText} />
           <MiniStat label="STREAK" value={stats.streakText} accent={streakAccent(stats)} />
@@ -804,7 +875,7 @@ function History({ history, stats, onDelete, onBack }) {
       <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
         <button onClick={onBack} style={{ width: 44, height: 44, borderRadius: 13, background: C.card2, color: C.ink, border: `1px solid ${C.line}`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><ChevronLeft size={22} /></button>
         <div>
-          <h1 style={{ color: C.ink, fontSize: 24, fontWeight: 800, letterSpacing: -0.3, margin: 0 }}>Match history</h1>
+          <h1 style={{ color: C.ink, fontSize: 24, fontWeight: 800, letterSpacing: -0.3, margin: 0 }}>Round history</h1>
           <div style={{ color: C.sub, fontSize: 12, ...tnum }}>{stats.recordText} · {stats.streakText} · {stats.marginStr}</div>
         </div>
       </div>
