@@ -21,9 +21,10 @@ const Target = (p) => <Icon {...p}><circle cx="12" cy="12" r="10" /><circle cx="
 const Trash = (p) => <Icon {...p}><polyline points="3 6 5 6 21 6" /><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" /><line x1="10" y1="11" x2="10" y2="17" /><line x1="14" y1="11" x2="14" y2="17" /><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" /></Icon>;
 const Clock = (p) => <Icon {...p}><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></Icon>;
 const MapPin = (p) => <Icon {...p}><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" /><circle cx="12" cy="10" r="3" /></Icon>;
+const X = (p) => <Icon {...p}><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></Icon>;
 
 /* build tag — bump alongside the sw.js cache version so a deploy is confirmable on-screen */
-const BUILD = "v8 · Aug 4";
+const BUILD = "v9 · Aug 8";
 
 /* palette — Shot Pattern dark */
 const C = {
@@ -567,7 +568,8 @@ function Setup({ course, setCourse, diff, setDiff, stats, onStart, onHistory }) 
 }
 
 /* ---------- play (fixed one screen) ---------- */
-function Play({ course, ghost, scores, setScores, hole, setHole, onFinish }) {
+function Play({ course, ghost, scores, setScores, hole, setHole, onFinish, onExit }) {
+  const [confirmExit, setConfirmExit] = useState(false);
   const m = useMemo(() => evalMatch(scores, ghost.holes), [scores, ghost]);
   const h = course.holes[hole], gh = ghost.holes[hole];
   const pending = scores[hole] ?? h.par;
@@ -596,16 +598,33 @@ function Play({ course, ghost, scores, setScores, hole, setHole, onFinish }) {
   return (
     <div style={{ height: "100dvh", maxWidth: 480, margin: "0 auto", display: "flex", flexDirection: "column", gap: 8, padding: "calc(env(safe-area-inset-top) + 8px) 12px calc(env(safe-area-inset-bottom) + 8px)", overflow: "hidden" }}>
       {/* header */}
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", flexShrink: 0 }}>
-        <div>
-          <div style={{ color: C.ink, fontWeight: 800, fontSize: 15 }}>{course.name}</div>
-          <div style={{ color: C.sub, fontSize: 11, ...tnum }}>{course.tee} · ghost {ghost.gross}</div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", flexShrink: 0, gap: 10 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
+          <button onClick={() => (filled === 0 ? onExit() : setConfirmExit(true))} aria-label="Exit round" style={{ width: 34, height: 34, borderRadius: 10, background: C.card2, color: C.sub, border: `1px solid ${C.line}`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><X size={18} /></button>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ color: C.ink, fontWeight: 800, fontSize: 15, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{course.name}</div>
+            <div style={{ color: C.sub, fontSize: 11, ...tnum }}>{course.tee} · ghost {ghost.gross}</div>
+          </div>
         </div>
-        <div style={{ textAlign: "right" }}>
+        <div style={{ textAlign: "right", flexShrink: 0 }}>
           <div style={{ ...lbl, fontSize: 10 }}>HOLE</div>
           <div style={{ fontFamily: NUM, fontWeight: 800, fontSize: 18, color: C.ink, ...tnum }}>{hole + 1}<span style={{ color: C.sub, fontSize: 12 }}>/18</span></div>
         </div>
       </div>
+
+      {/* exit confirmation */}
+      {confirmExit && (
+        <div onClick={() => setConfirmExit(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "flex-end", justifyContent: "center", zIndex: 60 }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 460, background: C.card, borderRadius: "20px 20px 0 0", border: `1px solid ${C.line}`, padding: "18px 18px calc(env(safe-area-inset-bottom) + 18px)" }}>
+            <div style={{ color: C.ink, fontWeight: 800, fontSize: 16, marginBottom: 4 }}>Leave this round?</div>
+            <div style={{ color: C.sub, fontSize: 13, marginBottom: 16 }}>You're on hole {hole + 1}. This round isn't finished, so it won't be saved to your record.</div>
+            <div style={{ display: "flex", gap: 10 }}>
+              <button onClick={() => setConfirmExit(false)} style={{ flex: 1, height: 50, borderRadius: 14, background: C.card2, color: C.ink, border: `1px solid ${C.line}`, fontWeight: 800, fontSize: 15 }}>Keep playing</button>
+              <button onClick={() => { setConfirmExit(false); onExit(); }} style={{ flex: 1, height: 50, borderRadius: 14, background: C.red, color: "#fff", fontWeight: 800, fontSize: 15 }}>Leave round</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* history rail */}
       <div style={{ display: "flex", gap: 3, flexShrink: 0 }}>
@@ -920,8 +939,10 @@ function loadState() {
     const course = validCourse(s.course) ? s.course : null;
     const scoresOk = Array.isArray(s.scores) && s.scores.length === 18;
     const scores = scoresOk ? s.scores.map(v => (typeof v === "number" && v > 0 ? v : null)) : Array(18).fill(null);
-    // Only restore an in-progress round when we have a valid course AND valid scores.
-    const wantResume = (s.screen === "play" || s.screen === "summary") && course && scoresOk;
+    const played = scores.filter(v => v != null).length;
+    // Resume ONLY a genuinely in-progress round: the play screen with at least one
+    // hole scored. An empty just-started round or a finished summary opens the menu.
+    const wantResume = s.screen === "play" && course && scoresOk && played >= 1;
     return {
       screen: wantResume ? s.screen : "setup",
       course,
@@ -964,6 +985,8 @@ function App() {
   const ghost = useMemo(() => course ? computeGhost(course, diff) : null, [course, diff]);
   const stats = useMemo(() => deriveStats(history), [history]);
   const start = () => { if (!course) return; setScores(Array(18).fill(null)); setHole(0); setRoundId(null); setScreen("play"); };
+  // Exit an unfinished round without saving it: clear scores and return to the menu.
+  const exitRound = () => { setScores(Array(18).fill(null)); setHole(0); setRoundId(null); setScreen("setup"); };
   // Finalize: persist the finished round, then a soft (editable) transition to summary.
   const finalize = (finalScores) => {
     const rec = buildRecord({ id: newId(), date: nowISO() }, course, diff, finalScores, ghost);
@@ -984,7 +1007,7 @@ function App() {
     <div style={{ minHeight: "100dvh", background: C.bg, color: C.ink, fontFamily: SANS }}>
       <style dangerouslySetInnerHTML={{ __html: RESET }} />
       {screen === "setup" && <Setup course={course} setCourse={setCourse} diff={diff} setDiff={setDiff} stats={stats} onStart={start} onHistory={() => setScreen("history")} />}
-      {screen === "play" && course && ghost && <Play course={course} ghost={ghost} scores={scores} setScores={setScores} hole={hole} setHole={setHole} onFinish={finalize} />}
+      {screen === "play" && course && ghost && <Play course={course} ghost={ghost} scores={scores} setScores={setScores} hole={hole} setHole={setHole} onFinish={finalize} onExit={exitRound} />}
       {screen === "summary" && course && ghost && <Summary course={course} ghost={ghost} scores={scores} history={history} onEditScore={editScore} onReset={reset} />}
       {screen === "history" && <History history={history} stats={stats} onDelete={deleteRound} onBack={() => setScreen("setup")} />}
     </div>
