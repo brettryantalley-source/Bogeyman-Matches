@@ -1,5 +1,5 @@
 /* Ghost Match — cache-first service worker */
-const CACHE = 'bogeyman-matches-v9';
+const CACHE = 'bogeyman-matches-v10';
 const SHELL = [
   './',
   './index.html',
