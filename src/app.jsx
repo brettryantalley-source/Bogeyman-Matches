@@ -29,7 +29,7 @@ const MapPin = (p) => <Icon {...p}><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0
 const X = (p) => <Icon {...p}><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></Icon>;
 
 /* build tag — bump alongside the sw.js cache version so a deploy is confirmable on-screen */
-const BUILD = "v10 · Aug 8";
+const BUILD = "v11 · Aug 8";
 
 /* palette — Shot Pattern dark */
 const C = {
@@ -573,20 +573,51 @@ function Setup({ course, setCourse, diff, setDiff, stats, onStart, onHistory }) 
 }
 
 /* ---------- play (fixed one screen) ---------- */
+/* running strokes-vs-ghost chart (derived from scores; no engine changes) */
+function GhostChart({ scores, ghost }) {
+  const W = 280, H = 78, top = 11, bot = 71;
+  let cum = 0; const played = [];
+  for (let i = 0; i < 18; i++) { if (scores[i] != null) { cum += scores[i] - ghost.holes[i]; played.push({ i, m: cum }); } }
+  const cur = played.length ? played[played.length - 1].m : 0;
+  const maxAbs = Math.max(3, ...played.map(p => Math.abs(p.m)));
+  const evenY = top + (bot - top) * 0.30;
+  const yOf = (m) => m >= 0 ? evenY + (m / maxAbs) * (bot - evenY) : evenY + (m / maxAbs) * (evenY - top);
+  const xOf = (i) => ((i + 1) / 18) * W;
+  const linePts = [[0, evenY]].concat(played.map(p => [xOf(p.i), yOf(p.m)]));
+  const lineStr = linePts.map(p => `${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(" ");
+  const lastX = linePts[linePts.length - 1][0], lastY = linePts[linePts.length - 1][1];
+  const areaStr = `${lineStr} ${lastX.toFixed(1)},${H} 0,${H}`;
+  const accent = cur > 0 ? C.red : cur < 0 ? C.green : C.slate;
+  const fill = cur > 0 ? "rgba(255,91,82,0.14)" : cur < 0 ? "rgba(87,199,127,0.14)" : "rgba(154,167,180,0.12)";
+  const status = played.length === 0 ? "not started" : cur > 0 ? `+${cur} · behind` : cur < 0 ? `${cur} · ahead` : "even";
+  return (
+    <div style={{ background: C.card, border: `1px solid ${C.line}`, borderRadius: 15, padding: "9px 12px 5px", flexShrink: 0 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 4 }}>
+        <span style={{ ...lbl, fontSize: 9 }}>STROKES VS GHOST</span>
+        <span style={{ fontFamily: NUM, fontSize: 11, fontWeight: 800, color: accent, ...tnum }}>{status}</span>
+      </div>
+      <svg viewBox={`0 0 ${W} ${H}`} width="100%" height={H} preserveAspectRatio="none" style={{ display: "block" }}>
+        <line x1="0" y1={evenY} x2={W} y2={evenY} stroke={C.line} strokeWidth="1" strokeDasharray="3 4" />
+        <text x="3" y={evenY - 3} fill={C.sub} fontSize="8">even</text>
+        {played.length > 0 && <polygon points={areaStr} fill={fill} />}
+        {played.length > 0 && <polyline points={lineStr} fill="none" stroke={accent} strokeWidth="3" strokeLinejoin="round" strokeLinecap="round" />}
+        {played.length > 0 && <circle cx={lastX} cy={lastY} r="5" fill={accent} stroke="#000" strokeWidth="2" />}
+        <text x={W - 3} y={evenY - 3} fill={C.sub} fontSize="8" textAnchor="end">18</text>
+      </svg>
+    </div>
+  );
+}
+
 function Play({ course, ghost, scores, setScores, hole, setHole, onFinish, onExit }) {
   const [confirmExit, setConfirmExit] = useState(false);
   const m = useMemo(() => evalMatch(scores, ghost.holes), [scores, ghost]);
   const h = course.holes[hole], gh = ghost.holes[hole];
   const pending = scores[hole] ?? h.par;
   const setVal = (v) => setScores(prev => { const n = [...prev]; n[hole] = Math.max(1, v); return n; });
-  const seg = m.segs[Math.floor(hole / 3)];
-  const segLeft = 3 - ((hole % 3) + 1);
   const lead = m.you - m.opp;
-  const commitGo = (dir) => { setScores(prev => { const n = [...prev]; if (n[hole] == null) n[hole] = h.par; return n; }); const nx = hole + dir; if (nx >= 0 && nx < 18) setHole(nx); };
   const filled = scores.filter(s => s != null).length;
   const allIn = filled === 18;
-  // Finalize is offered once every hole has a score (the current hole's pending
-  // value counts — it commits to par on tap). Disabled otherwise.
+  // Finalize once every hole has a score (the current hole's pending value counts).
   const onlyCurrentMissing = scores.every((s, i) => s != null || i === hole);
   const canFinalize = allIn || onlyCurrentMissing;
   const doFinalize = () => {
@@ -601,9 +632,9 @@ function Play({ course, ghost, scores, setScores, hole, setHole, onFinish, onExi
   const totSub = m.total.res !== "live" ? `${m.total.yourTot}–${m.total.ghostTot}` : marginText(m.total.liveMargin);
 
   return (
-    <div style={{ height: "100dvh", maxWidth: 480, margin: "0 auto", display: "flex", flexDirection: "column", gap: 8, padding: "calc(env(safe-area-inset-top) + 8px) 12px calc(env(safe-area-inset-bottom) + 8px)", overflow: "hidden" }}>
+    <div style={{ height: "100dvh", maxWidth: 480, margin: "0 auto", display: "flex", flexDirection: "column", justifyContent: "space-between", gap: 8, padding: "calc(env(safe-area-inset-top) + 10px) 14px calc(env(safe-area-inset-bottom) + 10px)", overflow: "hidden" }}>
       {/* header */}
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", flexShrink: 0, gap: 10 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexShrink: 0, gap: 10 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
           <button onClick={() => (filled === 0 ? onExit() : setConfirmExit(true))} aria-label="Exit round" style={{ width: 34, height: 34, borderRadius: 10, background: C.card2, color: C.sub, border: `1px solid ${C.line}`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><X size={18} /></button>
           <div style={{ minWidth: 0 }}>
@@ -631,78 +662,63 @@ function Play({ course, ghost, scores, setScores, hole, setHole, onFinish, onExi
         </div>
       )}
 
-      {/* history rail */}
-      <div style={{ display: "flex", gap: 3, flexShrink: 0 }}>
-        {scores.map((s, i) => {
-          let bg = C.card2;
-          if (s != null) { const d = s - ghost.holes[i]; bg = d < 0 ? C.green : d > 0 ? C.red : "#4A4E54"; }
-          return <div key={i} onClick={() => setHole(i)} style={{ flex: 1, height: 5, borderRadius: 2, background: bg, outline: i === hole ? `2px solid ${C.ink}` : "none" }} />;
-        })}
-      </div>
-
       {/* scoreboard */}
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: C.card, borderRadius: 16, padding: "10px 18px", flexShrink: 0 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: C.card, borderRadius: 16, padding: "9px 18px", flexShrink: 0 }}>
         <div>
           <div style={{ color: C.green, fontSize: 10, fontWeight: 800, letterSpacing: 1 }}>YOU</div>
-          <div style={{ fontFamily: NUM, fontSize: 36, fontWeight: 800, color: C.green, lineHeight: 1, ...tnum }}>{fmtPts(m.you)}</div>
+          <div style={{ fontFamily: NUM, fontSize: 34, fontWeight: 800, color: C.green, lineHeight: 1, ...tnum }}>{fmtPts(m.you)}</div>
         </div>
         <div style={{ color: lead > 0 ? C.green : lead < 0 ? C.red : C.sub, fontSize: 12, fontWeight: 800, letterSpacing: 0.5 }}>
           {lead === 0 ? "ALL SQUARE" : lead > 0 ? `${fmtPts(lead)} UP` : `${fmtPts(-lead)} DOWN`}
         </div>
         <div style={{ textAlign: "right" }}>
           <div style={{ color: C.slate, fontSize: 10, fontWeight: 800, letterSpacing: 1 }}>GHOST</div>
-          <div style={{ fontFamily: NUM, fontSize: 36, fontWeight: 800, color: C.slate, lineHeight: 1, ...tnum }}>{fmtPts(m.opp)}</div>
+          <div style={{ fontFamily: NUM, fontSize: 34, fontWeight: 800, color: C.slate, lineHeight: 1, ...tnum }}>{fmtPts(m.opp)}</div>
         </div>
       </div>
+
+      {/* running chart */}
+      <GhostChart scores={scores} ghost={ghost} />
 
       {/* segment strip */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(6,1fr)", gap: 5, flexShrink: 0 }}>
         {m.segs.map((s, i) => <SegCell key={i} res={s.res} label={segLab(s)} sub={segSub(s)} margin={s.liveMargin} />)}
       </div>
+
+      {/* front / back / total */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 5, flexShrink: 0 }}>
         <StatPill label="FRONT 9" res={m.front.res} sub={nineSub(m.front)} />
         <StatPill label="BACK 9" res={m.back.res} sub={nineSub(m.back)} />
         <StatPill label="TOTAL" res={m.total.res} sub={totSub} />
       </div>
 
-      {/* hole focus — fills remaining space, controls in thumb zone */}
-      <div style={{ flex: 1, display: "flex", flexDirection: "column", justifyContent: "center", gap: 8, minHeight: 0 }}>
-        <div style={{ background: C.card, borderRadius: 18, padding: 16, display: "flex", flexDirection: "column", gap: 12 }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-            <div>
-              <div style={{ color: C.ink, fontWeight: 700, fontSize: 15, ...tnum }}>Par {h.par}</div>
-              <div style={{ color: C.sub, fontSize: 12, ...tnum }}>Stroke index {h.si}</div>
-            </div>
-            <GhostRing value={gh} size={44} label="GHOST" />
-          </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-            <button onClick={() => setVal(pending - 1)} style={stepBtn}><Minus size={24} /></button>
-            <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center" }}>
-              <div style={{ fontFamily: NUM, fontSize: 54, fontWeight: 800, color: scores[hole] == null ? C.sub : C.green, lineHeight: 1, ...tnum }}>{pending}</div>
-              <div style={{ color: pending - h.par <= 0 ? C.green : C.sub, fontSize: 12, fontWeight: 700, marginTop: 3 }}>
-                {scoreName(pending, h.par)}{scores[hole] == null ? " · tap to log" : ""}
-              </div>
-            </div>
-            <button onClick={() => setVal(pending + 1)} style={stepBtn}><Plus size={24} /></button>
-          </div>
-        </div>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: C.card2, borderRadius: 12, padding: "8px 14px" }}>
-          <span style={{ color: C.sub, fontSize: 12 }}>Segment {Math.floor(hole / 3) + 1} · {segLeft === 0 ? "last hole" : `${segLeft} to play`}</span>
-          <span style={{ fontFamily: NUM, fontSize: 13, fontWeight: 700, color: seg.liveMargin < 0 ? C.green : seg.liveMargin > 0 ? C.red : C.sub }}>
-            {seg.holesIn === 0 ? "—" : seg.liveMargin === 0 ? "level" : seg.liveMargin < 0 ? `${-seg.liveMargin} ahead` : `${seg.liveMargin} behind`}
-          </span>
-        </div>
+      {/* 18-hole board — result at a glance; tap any hole to jump */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(9,1fr)", gap: 5, flexShrink: 0 }}>
+        {scores.map((s, i) => {
+          let bg = C.card2, col = C.sub, border = `1px solid ${C.line}`;
+          if (s != null) { const d = s - ghost.holes[i]; if (d < 0) { bg = C.green; col = "#07140C"; border = "none"; } else if (d > 0) { bg = C.red; col = "#fff"; border = "none"; } else { bg = "#4A4E54"; col = "#fff"; border = "none"; } }
+          const now = i === hole;
+          return <button key={i} onClick={() => setHole(i)} style={{ height: 30, borderRadius: 8, background: bg, color: col, border: now ? `2px solid ${C.ink}` : border, fontFamily: NUM, fontSize: 11, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", ...tnum }}>{i + 1}</button>;
+        })}
       </div>
 
-      {/* nav (thumb zone) */}
-      <div style={{ display: "flex", gap: 10, flexShrink: 0 }}>
-        <button onClick={() => commitGo(-1)} disabled={hole === 0} style={{ width: 60, height: 52, borderRadius: 14, background: C.card2, color: C.ink, border: `1px solid ${C.line}`, display: "flex", alignItems: "center", justifyContent: "center", opacity: hole === 0 ? 0.4 : 1 }}><ChevronLeft size={22} /></button>
-        {canFinalize ? (
-          <button onClick={doFinalize} style={{ flex: 1, height: 52, borderRadius: 14, background: C.green, color: "#07140C", fontSize: 16, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}><Flag size={18} /> Finalize round</button>
-        ) : (
-          <button onClick={() => commitGo(1)} disabled={hole === 17} style={{ flex: 1, height: 52, borderRadius: 14, background: hole === 17 ? C.card2 : C.green, color: hole === 17 ? C.sub : "#07140C", border: hole === 17 ? `1px solid ${C.line}` : "none", fontSize: 16, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>{hole === 17 ? "Finalize round" : <React.Fragment>Next hole <ChevronRight size={20} /></React.Fragment>}</button>
-        )}
+      {/* score entry (thumb zone) */}
+      <div style={{ display: "flex", alignItems: "center", gap: 12, flexShrink: 0 }}>
+        <button onClick={() => setVal(pending - 1)} style={stepBtn}><Minus size={24} /></button>
+        <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center" }}>
+          <div style={{ fontFamily: NUM, fontSize: 50, fontWeight: 800, color: scores[hole] == null ? C.sub : C.green, lineHeight: 1, ...tnum }}>{pending}</div>
+          <div style={{ color: pending - h.par <= 0 ? C.green : C.sub, fontSize: 12, fontWeight: 700, marginTop: 3 }}>
+            {scoreName(pending, h.par)}{scores[hole] == null ? " · tap to log" : ""}
+          </div>
+          <div style={{ color: C.sub, fontSize: 10, marginTop: 1, ...tnum }}>PAR {h.par} · SI {h.si} · GHOST {gh}</div>
+        </div>
+        <button onClick={() => setVal(pending + 1)} style={stepBtn}><Plus size={24} /></button>
       </div>
+
+      {/* finalize — appears once the round is complete */}
+      {canFinalize && (
+        <button onClick={doFinalize} style={{ flexShrink: 0, height: 50, borderRadius: 14, background: C.green, color: "#07140C", fontSize: 16, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}><Flag size={18} /> Finalize round</button>
+      )}
     </div>
   );
 }
