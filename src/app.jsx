@@ -29,7 +29,7 @@ const MapPin = (p) => <Icon {...p}><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0
 const X = (p) => <Icon {...p}><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></Icon>;
 
 /* build tag — bump alongside the sw.js cache version so a deploy is confirmable on-screen */
-const BUILD = "v11 · Aug 8";
+const BUILD = "v12 · Sep 19";
 
 /* palette — Shot Pattern dark */
 const C = {
@@ -43,7 +43,8 @@ const SANS = "-apple-system,ui-sans-serif,'SF Pro Text',system-ui,sans-serif";
 const tnum = { fontVariantNumeric: "tabular-nums" };
 const RESET = `*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 button{font-family:inherit;cursor:pointer;border:none;padding:0;background:none}
-html,body{margin:0;background:#000}`;
+html,body{margin:0;background:#000}
+.dialscroll::-webkit-scrollbar{display:none}`;
 
 /* ---------- live course source (golfcourseapi.com) ---------- */
 const API_BASE = "https://api.golfcourseapi.com/v1";
@@ -608,11 +609,61 @@ function GhostChart({ scores, ghost }) {
   );
 }
 
+/* score picker wheel — par centered & enlarged, roll to your number, tap to log */
+function ScoreDial({ par, si, ghost, value, onPick }) {
+  const ref = React.useRef(null);
+  const raf = React.useRef(0);
+  const W = 56;
+  const min = Math.max(1, par - 4), max = par + 8;
+  const nums = []; for (let n = min; n <= max; n++) nums.push(n);
+  const [center, setCenter] = useState(value != null ? value : par);
+  React.useLayoutEffect(() => {
+    const el = ref.current; if (!el) return;
+    const sel = value != null ? value : par;
+    el.scrollLeft = (sel - min) * W;
+    setCenter(sel);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const onScroll = () => {
+    if (raf.current) return;
+    raf.current = requestAnimationFrame(() => {
+      raf.current = 0;
+      const el = ref.current; if (!el) return;
+      setCenter(Math.min(max, Math.max(min, min + Math.round(el.scrollLeft / W))));
+    });
+  };
+  const pick = (n) => { onPick(n); setCenter(n); const el = ref.current; if (el) el.scrollTo({ left: (n - min) * W, behavior: "smooth" }); };
+  const size = (d) => d === 0 ? 42 : d === 1 ? 27 : d === 2 ? 20 : 16;
+  const op = (d) => d === 0 ? 1 : d === 1 ? 0.82 : d === 2 ? 0.55 : 0.38;
+  const logged = value != null && value === center;
+  return (
+    <div style={{ flexShrink: 0 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", padding: "0 6px 5px" }}>
+        <span style={{ color: C.sub, fontSize: 11, fontWeight: 700, ...tnum }}>PAR {par} · SI {si}</span>
+        <span style={{ color: logged ? C.green : C.ink, fontSize: 12, fontWeight: 800 }}>{scoreName(center, par)}{logged ? " · logged ✓" : " · tap to log"}</span>
+        <span style={{ color: C.slate, fontSize: 11, fontWeight: 700, ...tnum }}>GHOST {ghost}</span>
+      </div>
+      <div style={{ position: "relative", height: 66 }}>
+        <div style={{ position: "absolute", top: 3, left: "50%", transform: "translateX(-50%)", width: 60, height: 60, borderRadius: 15, border: `1.5px solid ${C.green}`, background: C.greenDim, pointerEvents: "none" }} />
+        <div ref={ref} onScroll={onScroll} className="dialscroll" style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", overflowX: "auto", overflowY: "hidden", scrollSnapType: "x mandatory", paddingInline: "calc(50% - 28px)", WebkitOverflowScrolling: "touch", scrollbarWidth: "none" }}>
+          {nums.map(n => {
+            const d = Math.abs(n - center);
+            return (
+              <button key={n} onClick={() => pick(n)} style={{ scrollSnapAlign: "center", flex: "0 0 56px", width: 56, height: 66, display: "flex", alignItems: "center", justifyContent: "center", background: "none", border: "none", padding: 0 }}>
+                <span style={{ fontFamily: NUM, fontWeight: d === 0 ? 800 : 700, fontSize: size(d), lineHeight: 1, color: n === value ? C.green : d === 0 ? C.ink : C.sub, opacity: op(d), ...tnum }}>{n}</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function Play({ course, ghost, scores, setScores, hole, setHole, onFinish, onExit }) {
   const [confirmExit, setConfirmExit] = useState(false);
   const m = useMemo(() => evalMatch(scores, ghost.holes), [scores, ghost]);
   const h = course.holes[hole], gh = ghost.holes[hole];
-  const pending = scores[hole] ?? h.par;
   const setVal = (v) => setScores(prev => { const n = [...prev]; n[hole] = Math.max(1, v); return n; });
   const lead = m.you - m.opp;
   const filled = scores.filter(s => s != null).length;
@@ -702,18 +753,8 @@ function Play({ course, ghost, scores, setScores, hole, setHole, onFinish, onExi
         })}
       </div>
 
-      {/* score entry (thumb zone) */}
-      <div style={{ display: "flex", alignItems: "center", gap: 12, flexShrink: 0 }}>
-        <button onClick={() => setVal(pending - 1)} style={stepBtn}><Minus size={24} /></button>
-        <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center" }}>
-          <div style={{ fontFamily: NUM, fontSize: 50, fontWeight: 800, color: scores[hole] == null ? C.sub : C.green, lineHeight: 1, ...tnum }}>{pending}</div>
-          <div style={{ color: pending - h.par <= 0 ? C.green : C.sub, fontSize: 12, fontWeight: 700, marginTop: 3 }}>
-            {scoreName(pending, h.par)}{scores[hole] == null ? " · tap to log" : ""}
-          </div>
-          <div style={{ color: C.sub, fontSize: 10, marginTop: 1, ...tnum }}>PAR {h.par} · SI {h.si} · GHOST {gh}</div>
-        </div>
-        <button onClick={() => setVal(pending + 1)} style={stepBtn}><Plus size={24} /></button>
-      </div>
+      {/* score entry — roll the dial to your number, tap to log (par is centered) */}
+      <ScoreDial key={hole} par={h.par} si={h.si} ghost={gh} value={scores[hole]} onPick={setVal} />
 
       {/* finalize — appears once the round is complete */}
       {canFinalize && (
