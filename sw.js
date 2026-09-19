@@ -1,5 +1,5 @@
-/* Ghost Match — cache-first service worker */
-const CACHE = 'bogeyman-matches-v12';
+/* Ghost Match — network-first service worker (latest when online, cached fallback offline) */
+const CACHE = 'bogeyman-matches-v14';
 const SHELL = [
   './',
   './index.html',
@@ -24,18 +24,20 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
   const req = event.request;
   if (req.method !== 'GET') return;
-  // Only ever serve same-origin shell assets from cache. Cross-origin live data
-  // (golfcourseapi, the published Sheet CSV) must always hit the network.
+  // Cross-origin live data (golfcourseapi, the published Sheet CSV) always hits the network.
   if (new URL(req.url).origin !== self.location.origin) return;
+  // Network-first for same-origin shell: online you always get the latest bundle
+  // (deploys show on the next open, no double-reopen). Offline, fall back to cache,
+  // and serve the cached page for navigations so the app still launches at the course.
   event.respondWith(
-    caches.match(req).then((hit) => {
-      if (hit) return hit;
-      return fetch(req).then((res) => {
-        if (!res || res.status !== 200 || res.type === 'opaque') return res;
-        const copy = res.clone();
-        caches.open(CACHE).then((c) => c.put(req, copy));
+    fetch(req)
+      .then((res) => {
+        if (res && res.ok && res.type === 'basic') {
+          const copy = res.clone();
+          caches.open(CACHE).then((c) => c.put(req, copy));
+        }
         return res;
-      }).catch(() => caches.match('./index.html'));
-    })
+      })
+      .catch(() => caches.match(req).then((hit) => hit || caches.match('./index.html')))
   );
 });

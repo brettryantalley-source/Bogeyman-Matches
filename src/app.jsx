@@ -29,7 +29,7 @@ const MapPin = (p) => <Icon {...p}><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0
 const X = (p) => <Icon {...p}><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></Icon>;
 
 /* build tag — bump alongside the sw.js cache version so a deploy is confirmable on-screen */
-const BUILD = "v12 · Sep 19";
+const BUILD = "v14 · Sep 19";
 
 /* palette — Shot Pattern dark */
 const C = {
@@ -165,57 +165,89 @@ const scoreName = (s, par) => { const d = s - par; return d <= -3 ? "albatross" 
 const fmtPts = (n) => Number.isInteger(n) ? `${n}` : n.toFixed(2).replace(/\.?0+$/, "");
 const marginText = (m) => m === 0 ? "AS" : m < 0 ? `${-m}↑` : `${m}↓`;
 
-/* ---------- Google Sheet auto last-5 differential (read-only; write-back deferred) ---------- */
-const CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vRzaFF9AvD61Y6iWgCyeEVm_bCG2DVW8waalO3Fdom3tFiIC3vmGv_Oqe_9xJQikMvQexT9sTIEu7hQ/pub?gid=0&single=true&output=csv";
-const DIFF_CACHE_KEY = "bogeyman-matches:diff-cache:v1";
-/* minimal RFC-4180-ish CSV parser (handles quoted fields with commas) */
-function parseCSV(text) {
-  const rows = []; let row = [], field = "", q = false;
-  for (let i = 0; i < text.length; i++) {
-    const ch = text[i];
-    if (q) {
-      if (ch === '"') { if (text[i + 1] === '"') { field += '"'; i++; } else q = false; }
-      else field += ch;
-    } else if (ch === '"') { q = true; }
-    else if (ch === ",") { row.push(field); field = ""; }
-    else if (ch === "\n") { row.push(field); rows.push(row); row = []; field = ""; }
-    else if (ch === "\r") { /* skip */ }
-    else field += ch;
-  }
-  if (field.length || row.length) { row.push(field); rows.push(row); }
-  return rows;
+/* ---------- auto last-5 differential, computed from the app's own finished rounds ----------
+   Replaces the published-Sheet source (v5-v13). Every finalized round stores the parts
+   needed to score itself; the Setup differential is the average of the most recent
+   DIFF_WINDOW of them. Nothing is fetched — this works offline at the course. */
+const DIFF_WINDOW = 5;
+const fmtShortDate = (d) => { try { return `${MONTHS[d.getMonth()]} ${d.getDate()}`; } catch (e) { return ""; } };
+
+/* Strokes received on each hole at a given course handicap. Same distribution the ghost
+   gets in computeGhost — one stroke per hole by stroke index, hardest first, wrapping
+   past 18 — so the player and the ghost are stroked off the same card. */
+function strokesByHole(strokeIndex, hcp) {
+  const base = Math.floor(hcp / 18), rem = ((hcp % 18) + 18) % 18;
+  return strokeIndex.map(si => base + (si <= rem ? 1 : 0));
 }
-/* tolerant date parse — ISO first (no TZ drift), then Date.parse fallback */
-function parseSheetDate(s) {
-  if (!s) return null;
-  const t = String(s).trim();
-  const iso = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(t);
-  if (iso) { const d = new Date(+iso[1], +iso[2] - 1, +iso[3]); return isNaN(d.getTime()) ? null : d; }
-  const ms = Date.parse(t);
-  return isNaN(ms) ? null : new Date(ms);
+/* USGA-style adjusted gross: each hole capped at net double bogey (par + 2 + strokes
+   received), so one blow-up hole can't inflate the differential. */
+function adjustedGross(holeScores, pars, strokeIndex, hcp) {
+  const str = strokesByHole(strokeIndex, hcp);
+  return holeScores.reduce((a, s, i) => a + Math.min(s ?? 0, pars[i] + 2 + str[i]), 0);
 }
-const fmtSheetShort = (d) => { try { return `${MONTHS[d.getMonth()]} ${d.getDate()}`; } catch (e) { return ""; } };
-/* CSV text -> {diff, asOf, count} from the 5 most-recent valid rows, or null */
-function computeLast5(text) {
-  const rows = parseCSV(text);
-  if (rows.length < 2) return null;
-  const header = rows[0].map(h => h.trim().toLowerCase());
-  const di = header.indexOf("date");
-  const fi = header.indexOf("differential");
-  if (di === -1 || fi === -1) return null;
-  const recs = [];
-  for (let r = 1; r < rows.length; r++) {
-    const d = parseSheetDate(rows[r][di]);
-    const raw = (rows[r][fi] ?? "").trim();
-    const v = parseFloat(raw);
-    if (!d || raw === "" || isNaN(v)) continue;   // skip blanks / notes / summary rows
-    recs.push({ d, v });
+/* Score Differential, rounded to 0.1. (No PCC — this is the simplified calc.) */
+const scoreDifferential = (gross, rating, slope) => Math.round((gross - rating) * 113 / slope * 10) / 10;
+
+/* Records written before v2 stored rating/slope only as the "70.1/125" string. */
+function parseRatingSlope(s) {
+  const m = /^\s*([\d.]+)\s*\/\s*(\d+)\s*$/.exec(String(s ?? ""));
+  if (!m) return null;
+  const rating = parseFloat(m[1]), slope = parseInt(m[2], 10);
+  return isFinite(rating) && slope > 0 ? { rating, slope } : null;
+}
+/* One round's differential. v2 records carry pars + stroke indexes, so the gross is
+   capped at net double bogey; older records have only the rating/slope string and fall
+   back to an uncapped gross so they still count toward the last-5. null = unusable. */
+function recordDifferential(r) {
+  if (!r) return null;
+  let rating = typeof r.rating === "number" ? r.rating : null;
+  let slope = typeof r.slope === "number" ? r.slope : null;
+  if (rating == null || slope == null) {
+    const rs = parseRatingSlope(r.ratingSlope);
+    if (!rs) return null;
+    rating = rs.rating; slope = rs.slope;
   }
+  if (!(slope > 0) || !isFinite(rating)) return null;
+  const scores = Array.isArray(r.holeScores) ? r.holeScores : null;
+  const canCap = !!scores && scores.length === 18 &&
+    Array.isArray(r.pars) && r.pars.length === 18 &&
+    Array.isArray(r.strokeIndex) && r.strokeIndex.length === 18 &&
+    typeof r.par === "number" && typeof r.differentialUsed === "number";
+  const gross = canCap
+    ? adjustedGross(scores, r.pars, r.strokeIndex, Math.round(r.differentialUsed * slope / 113 + (rating - r.par)))
+    : (typeof r.yourTotal === "number" ? r.yourTotal : null);
+  if (gross == null || !isFinite(gross) || gross <= 0) return null;
+  return scoreDifferential(gross, rating, slope);
+}
+/* Brett's official last-5 (GHIN) as of Sep 19 2026, so the app starts calibrated instead
+   of cold. These seed the differential ONLY — they are not match records, so they never
+   touch the W-L-T. Each in-app round played after Sep 5 2026 pushes one further out of
+   the window; once five newer rounds exist these stop counting on their own. Gross only
+   (no hole detail came across), so no net-double cap is applied to them. */
+const SEED_ROUNDS = [
+  { date: "2026-09-05", course: "Beachwood Golf Club",              tee: "Blue",  rating: 71.6, slope: 127, gross: 86 },
+  { date: "2026-08-15", course: "Chicopee Woods · School/Village",  tee: "Gold",  rating: 73.6, slope: 137, gross: 81 },
+  { date: "2026-08-09", course: "RiverPines Golf Course",           tee: "Black", rating: 71.1, slope: 132, gross: 80 },
+  { date: "2026-08-03", course: "Chicopee Woods · Village/Mill",    tee: "Gold",  rating: 72.7, slope: 133, gross: 78 },
+  { date: "2026-07-26", course: "Sugar Creek Golf Course",          tee: "Blue",  rating: 70.1, slope: 125, gross: 81 },
+];
+
+/* {diff, asOf, count, total, seeded} over the DIFF_WINDOW most recent rounds — played
+   rounds and seeds pooled together and taken by date — or null when there's nothing
+   scorable. Recomputed whenever history changes. */
+function computeAutoDiff(history) {
+  const recs = (history || [])
+    .map(r => ({ d: new Date(r && r.date), v: recordDifferential(r), seed: false }))
+    .filter(x => x.v != null && !isNaN(x.d.getTime()));
+  SEED_ROUNDS.forEach(s => {
+    const d = new Date(s.date + "T12:00:00");           // noon: no TZ drift across the date line
+    if (!isNaN(d.getTime()) && s.slope > 0) recs.push({ d, v: scoreDifferential(s.gross, s.rating, s.slope), seed: true });
+  });
   if (!recs.length) return null;
   recs.sort((a, b) => b.d - a.d);
-  const last5 = recs.slice(0, 5);
-  const avg = Math.round((last5.reduce((a, x) => a + x.v, 0) / last5.length) * 10) / 10;
-  return { diff: avg, asOf: last5[0].d, count: last5.length };
+  const last = recs.slice(0, DIFF_WINDOW);
+  const avg = Math.round((last.reduce((a, x) => a + x.v, 0) / last.length) * 10) / 10;
+  return { diff: avg, asOf: last[0].d, count: last.length, total: recs.length, seeded: last.filter(x => x.seed).length };
 }
 
 /* ---------- history records (reuses evalMatch; no engine changes) ---------- */
@@ -227,10 +259,14 @@ function buildRecord(base, course, diff, scores, ghost) {
   const yourIn = scores.slice(9).reduce((a, s) => a + (s ?? 0), 0);
   const yourPoints = m.you, ghostPoints = m.opp;
   const result = yourPoints > 4.0001 ? "W" : yourPoints < 3.9999 ? "L" : "T";
-  return {
-    version: 1,
+  const rec = {
+    version: 2,
     id: base.id, date: base.date,
     course: course.name, tee: course.tee, ratingSlope: `${course.rating}/${course.slope}`,
+    // v2: rating/slope/par and the per-hole card as NUMBERS, so the round can score its
+    // own differential later without re-parsing the display string.
+    rating: course.rating, slope: course.slope, par: course.par,
+    pars: course.holes.map(h => h.par), strokeIndex: course.holes.map(h => h.si),
     differentialUsed: diff,
     holeScores: scores.slice(), ghostHoleScores: ghost.holes.slice(),
     yardages: course.holes.map(h => typeof h.yards === "number" ? h.yards : null),
@@ -238,6 +274,9 @@ function buildRecord(base, course, diff, scores, ghost) {
     yourPoints, ghostPoints,
     result,
   };
+  // This round's own Score Differential — the thing the last-5 averages.
+  rec.differential = recordDifferential(rec);
+  return rec;
 }
 function deriveStats(history) {
   const n = history.length;
@@ -316,7 +355,7 @@ const stepBtn = { width: 54, height: 54, borderRadius: 15, background: C.card2, 
 const lbl = { color: C.sub, fontSize: 11, fontWeight: 800, letterSpacing: 1 };
 
 /* ---------- setup (one screen: search course · pick tee · differential · start) ---------- */
-function Setup({ course, setCourse, diff, setDiff, stats, onStart, onHistory }) {
+function Setup({ course, setCourse, diff, setDiff, stats, history, onStart, onHistory }) {
   /* --- course search (golfcourseapi, debounced) --- */
   const [query, setQuery] = useState("");
   const [results, setResults] = useState([]);              // raw API results (up to 40)
@@ -392,43 +431,23 @@ function Setup({ course, setCourse, diff, setDiff, stats, onStart, onHistory }) 
     setCourse(opt && selectedFull ? buildCourse(selectedFull, opt) : null);
   };
 
-  /* --- auto last-5 differential from Brett's published Sheet (v5, preserved) ---
-     cache-first, then network, then manual. Never blocks; override is this-round-only. */
-  const [source, setSource] = useState("loading"); // loading | sheet | cache | manual | none
-  const [asOf, setAsOf] = useState(null);
-  const overridden = React.useRef(false);
-  const aliveRef = React.useRef(true);
-  const syncDiff = React.useCallback(() => {
-    overridden.current = false;
-    let cache = null;
-    try { const raw = localStorage.getItem(DIFF_CACHE_KEY); if (raw) { const cc = JSON.parse(raw); if (cc && typeof cc.diff === "number") cache = cc; } } catch (e) { /* ignore */ }
-    if (cache) { setDiff(cache.diff); setAsOf(cache.asOf ? new Date(cache.asOf) : null); setSource("cache"); }
-    else { setSource("loading"); }
-    fetch(CSV_URL, { redirect: "follow", cache: "no-store" })
-      .then(r => r.ok ? r.text() : Promise.reject(new Error("http " + r.status)))
-      .then(text => {
-        const res = computeLast5(text);
-        if (!res) throw new Error("no valid rows");
-        try { localStorage.setItem(DIFF_CACHE_KEY, JSON.stringify({ diff: res.diff, asOf: res.asOf.toISOString(), fetchedAt: nowISO() })); } catch (e) { /* quota */ }
-        if (!aliveRef.current || overridden.current) return;
-        setDiff(res.diff); setAsOf(res.asOf); setSource("sheet");
-      })
-      .catch(() => {
-        if (!aliveRef.current || overridden.current) return;
-        setSource(cache ? "cache" : "none");
-      });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [setDiff]);
-  useEffect(() => { aliveRef.current = true; syncDiff(); return () => { aliveRef.current = false; }; }, [syncDiff]);
-  const bumpDiff = (delta) => { overridden.current = true; setSource("manual"); setDiff(d => Math.max(0, Math.round((d + delta) * 10) / 10)); };
-  const asOfLbl = asOf ? ` (${fmtSheetShort(asOf)})` : "";
+  /* --- auto last-5 differential from your own finished rounds (v14) ---
+     Derived from history, so it updates the moment a round is finalized, edited or
+     deleted. Manual override is this-round-only (Setup remounts fresh each round). */
+  const auto = useMemo(() => computeAutoDiff(history), [history]);
+  const [manual, setManual] = useState(false);
+  useEffect(() => { if (!manual && auto) setDiff(auto.diff); }, [manual, auto, setDiff]);
+  const bumpDiff = (delta) => { setManual(true); setDiff(d => Math.max(0, Math.round((d + delta) * 10) / 10)); };
+  const useAuto = () => { setManual(false); if (auto) setDiff(auto.diff); };
+  const asOfLbl = auto && auto.asOf ? ` (${fmtShortDate(auto.asOf)})` : "";
   const srcLine =
-    source === "loading" ? "Syncing your Sheet…" :
-    source === "sheet" ? `Last-5: ${diff.toFixed(1)} · from your Sheet${asOfLbl}` :
-    source === "cache" ? `Last-5: ${diff.toFixed(1)} · using last synced${asOfLbl}` :
-    source === "manual" ? "Manual override · applies to this round only" :
-    "No sync — set your last-5 differential manually";
-  const srcColor = source === "sheet" ? C.green : source === "manual" ? C.ink : C.sub;
+    manual ? "Manual override · applies to this round only" :
+    !auto ? "No rounds yet — set your differential manually" :
+    auto.count < DIFF_WINDOW ? `Last-${auto.count}: ${diff.toFixed(1)} · from your rounds (${auto.count} of ${DIFF_WINDOW})` :
+    auto.seeded === auto.count ? `Last-${DIFF_WINDOW}: ${diff.toFixed(1)} · your official last-5${asOfLbl}` :
+    auto.seeded ? `Last-${DIFF_WINDOW}: ${diff.toFixed(1)} · ${auto.count - auto.seeded} played + ${auto.seeded} seeded` :
+    `Last-${DIFF_WINDOW}: ${diff.toFixed(1)} · from your rounds${asOfLbl}`;
+  const srcColor = manual ? C.ink : auto && auto.count >= DIFF_WINDOW ? C.green : C.sub;
 
   const g = course ? computeGhost(course, diff) : null;
   const teeLabel = (o) => `${o.tee.tee_name || o.gender} · ${o.tee.course_rating}/${o.tee.slope_rating}${o.gender === "female" ? " (F)" : ""}`;
@@ -537,12 +556,12 @@ function Setup({ course, setCourse, diff, setDiff, stats, onStart, onHistory }) 
           </div>
         )}
 
-        {/* differential (v5 block, reused) */}
+        {/* differential — auto from your last-5 rounds, with a manual override */}
         <div>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-            <div style={lbl}>YOUR LAST-5 DIFFERENTIAL</div>
-            {source === "manual" && (
-              <button onClick={syncDiff} style={{ color: C.green, fontSize: 11, fontWeight: 800, letterSpacing: 0.5, background: "none" }}>USE SHEET</button>
+            <div style={lbl}>YOUR LAST-{DIFF_WINDOW} DIFFERENTIAL</div>
+            {manual && auto && (
+              <button onClick={useAuto} style={{ color: C.green, fontSize: 11, fontWeight: 800, letterSpacing: 0.5, background: "none" }}>USE AUTO</button>
             )}
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 12, margin: "8px 0 4px" }}>
@@ -966,12 +985,13 @@ function History({ history, stats, onDelete, onBack }) {
       ) : rounds.map(r => {
         const confirming = confirmId === r.id;
         const margin = r.yourPoints - r.ghostPoints;
+        const rd = recordDifferential(r); // this round's differential — feeds the last-5
         return (
           <div key={r.id} style={{ display: "flex", alignItems: "center", gap: 12, background: C.card, border: `1px solid ${C.line}`, borderRadius: 14, padding: "12px 14px", marginBottom: 8 }}>
             <div style={{ width: 34, height: 34, borderRadius: 9, background: C.card2, color: resColor(r.result), display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 15, flexShrink: 0 }}>{r.result}</div>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ color: C.ink, fontWeight: 700, fontSize: 14, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{r.course}<span style={{ color: C.sub, fontWeight: 600 }}> · {r.tee}</span></div>
-              <div style={{ color: C.sub, fontSize: 11, ...tnum }}>{fmtDate(r.date)} · {fmtPts(r.yourPoints)}–{fmtPts(r.ghostPoints)} · {margin >= 0 ? "+" : ""}{margin.toFixed(1)}</div>
+              <div style={{ color: C.sub, fontSize: 11, ...tnum }}>{fmtDate(r.date)} · {fmtPts(r.yourPoints)}–{fmtPts(r.ghostPoints)} · {margin >= 0 ? "+" : ""}{margin.toFixed(1)}{rd != null ? ` · diff ${rd.toFixed(1)}` : ""}</div>
             </div>
             {confirming ? (
               <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
@@ -1068,7 +1088,7 @@ function App() {
   return (
     <div style={{ minHeight: "100dvh", background: C.bg, color: C.ink, fontFamily: SANS }}>
       <style dangerouslySetInnerHTML={{ __html: RESET }} />
-      {screen === "setup" && <Setup course={course} setCourse={setCourse} diff={diff} setDiff={setDiff} stats={stats} onStart={start} onHistory={() => setScreen("history")} />}
+      {screen === "setup" && <Setup course={course} setCourse={setCourse} diff={diff} setDiff={setDiff} stats={stats} history={history} onStart={start} onHistory={() => setScreen("history")} />}
       {screen === "play" && course && ghost && <Play course={course} ghost={ghost} scores={scores} setScores={setScores} hole={hole} setHole={setHole} onFinish={finalize} onExit={exitRound} />}
       {screen === "summary" && course && ghost && <Summary course={course} ghost={ghost} scores={scores} history={history} onEditScore={editScore} onReset={reset} />}
       {screen === "history" && <History history={history} stats={stats} onDelete={deleteRound} onBack={() => setScreen("setup")} />}
