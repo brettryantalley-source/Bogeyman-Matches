@@ -2,7 +2,11 @@
   "name": "bogeyman-matches",
   "version": "16.0.0",
   "private": true,
+  "type": "module",
   "description": "Ghost Match — build deps only. React ships as UMD; this is here for the Firebase SDK, which esbuild tree-shakes into index.html.",
+  "scripts": {
+    "test": "node --test src/caddie.test.js"
+  },
   "dependencies": {
     "firebase": "^12.4.0"
   }
