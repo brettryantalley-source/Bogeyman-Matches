@@ -1,0 +1,50 @@
+{
+  "meta": { "asOf": "2026-09-19", "source": "Shot Pattern L5 ×2 + club screens; June Tangent baseline" },
+
+  "clubs": [
+    { "id": "Dr",  "name": "Driver",   "median": 288, "p25": 277, "p75": 309, "depth80": 102, "width80": 97,
+      "tee": true,  "approach": false, "penaltyPct": 0.16, "recoveryPct": 0.11, "bigMissR": 0.18, "bigMissL": 0.11, "corridor90": 108 },
+    { "id": "2i",  "name": "2-iron",   "median": 260, "p25": 249, "p75": 262, "depth80": 76,  "width80": 56,
+      "tee": true,  "approach": true,  "penaltyPct": 0.06, "recoveryPct": 0.24 },
+    { "id": "2Hy", "name": "2-hybrid", "median": 257, "p25": 236, "p75": 264, "depth80": 112, "width80": 57,
+      "tee": true,  "approach": true,  "penaltyPct": 0.00, "recoveryPct": 0.00, "lowConfidence": true },
+    { "id": "4Hy", "name": "4-hybrid", "median": 232, "p25": 223, "p75": 242, "depth80": 69,  "width80": 59,
+      "tee": false, "approach": true,  "penaltyPct": 0.06, "recoveryPct": 0.25, "teeBanReason": "36% trouble off the tee, −0.32 SG/shot" },
+    { "id": "5i",  "name": "5-iron",   "median": 200, "p25": 193, "p75": 209, "depth80": 48, "width80": 64, "approach": true, "shortPct": 0.27 },
+    { "id": "6i",  "name": "6-iron",   "median": 190, "p25": 189, "p75": 199, "depth80": 54, "width80": 26, "approach": true, "shortPct": 0.17 },
+    { "id": "7i",  "name": "7-iron",   "median": 183, "p25": 178, "p75": 187, "depth80": 40, "width80": 42, "approach": true, "shortPct": 0.10 },
+    { "id": "8i",  "name": "8-iron",   "median": 169, "p25": 161, "p75": 173, "depth80": 37, "width80": 28, "approach": true, "shortPct": 0.00 },
+    { "id": "9i",  "name": "9-iron",   "median": 152, "p25": 148, "p75": 158, "depth80": 29, "width80": 43, "approach": true, "shortPct": 0.00 },
+    { "id": "PW",  "name": "PW",       "median": 136, "p25": 126, "p75": 144, "depth80": 21, "width80": 20, "approach": true, "shortPct": 0.33 },
+    { "id": "GW",  "name": "GW",       "median": 121, "p25": 114, "p75": 131, "depth80": 32, "width80": 27, "approach": true, "shortPct": 0.24 },
+    { "id": "SW",  "name": "SW",       "median": 95,  "p25": 88,  "p75": 100, "approach": true, "shortPct": 0.29 },
+    { "id": "LW",  "name": "LW",       "median": 84,  "p25": 78,  "p75": 90,  "approach": true, "shortPct": 0.26 }
+  ],
+
+  "zones": [
+    { "from": 50,  "to": 75,  "grade": "amber", "gir": 0.56, "proxFt": 20, "n": 9,  "note": "volatile — 33% then 100% GIR" },
+    { "from": 75,  "to": 100, "grade": "amber", "gir": 0.67, "proxFt": 31, "n": 21, "note": "OK, not a weapon — plays like a 10 hcp" },
+    { "from": 100, "to": 130, "grade": "red",   "gir": 0.36, "proxFt": 45, "n": 11, "note": "your worst number — 25–36% GIR, no stock club between GW 121 and SW 95" },
+    { "from": 130, "to": 150, "grade": "green", "gir": 0.73, "proxFt": 26, "n": 11, "note": "your best number — 71–75% GIR, 23–30 ft" },
+    { "from": 150, "to": 180, "grade": "red",   "gir": 0.34, "proxFt": 55, "n": 29, "note": "25–38% GIR, 50–65 ft, half are big misses" },
+    { "from": 180, "to": 190, "grade": "green", "gir": 0.83, "proxFt": 23, "n": 6,  "note": "75–100% GIR, small sample" },
+    { "from": 190, "to": 225, "grade": "amber", "gir": 0.29, "proxFt": 62, "n": 21, "note": "normal for the distance" },
+    { "from": 225, "to": 999, "grade": "amber", "gir": 0.25, "proxFt": 70, "n": 4,  "note": "layup territory" }
+  ],
+
+  "benchGir": [[62,0.836],[87,0.786],[105,0.755],[115,0.735],[125,0.695],[135,0.66],[145,0.62],[155,0.565],[165,0.515],[175,0.465],[185,0.37],[195,0.335],[212,0.256]],
+
+  "tendencies": {
+    "approach": { "missShort": "20–30% with wedges and PW; long misses barely register", "roughIsFine": "PW 83%, 9i 75% GIR from rough" },
+    "driver":   { "corridor90": 108, "rightPct": 0.57, "penaltiesInsideCorridor": 5, "penaltiesTotal": 5, "read": "penalties were normal misses aimed where a 45-yd miss was wet" },
+    "putting":  { "missRightPct": 0.59, "missRightPct10Plus": 0.62, "runsPastFt": "1–3", "speedGoodPct": 0.80,
+                  "make": { "0-3": 0.95, "4-6": 0.42, "7-9": 0.20, "10-15": 0.09, "16-24": 0.16, "25-40": 0.06 },
+                  "threePutt": { "25-40": 0.27, "41+": 0.67 } },
+    "shortGame": { "proxRough": { "0-12": 5.5, "13-25": 7.4, "26-37": 14.4, "38-50": 20.7 }, "pitchShortPct": 0.27, "pitchLongPct": 0.11,
+                   "upAndDown": { "0-25rough": 0.45, "25-50rough": 0.08 } }
+  },
+
+  "constants": { "penaltyCost": 1.1, "recoveryCost": 0.8, "tightTax": 0.15, "waterSideTax": 0.10, "shrinkK": 10, "parBase": 0.60, "strokeToParScale": 0.5 },
+
+  "wet": { "carryOnly": true, "clubUp": 2, "avoidBunkers": true, "firmPutts": true }
+}
