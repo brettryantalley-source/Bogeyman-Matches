@@ -1,3 +1,7 @@
+import { initializeApp } from "firebase/app";
+import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, onAuthStateChanged, signOut as fbSignOut } from "firebase/auth";
+import { initializeFirestore, persistentLocalCache, persistentSingleTabManager, collection, doc, setDoc, getDocs } from "firebase/firestore";
+
 const React = window.React;
 const { useState, useMemo, useEffect } = React;
 const { createRoot } = window.ReactDOM;
@@ -29,7 +33,7 @@ const MapPin = (p) => <Icon {...p}><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0
 const X = (p) => <Icon {...p}><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></Icon>;
 
 /* build tag — bump alongside the sw.js cache version so a deploy is confirmable on-screen */
-const BUILD = "v15 · Sep 19";
+const BUILD = "v16 · Sep 19";
 
 /* palette — Shot Pattern dark */
 const C = {
@@ -260,8 +264,11 @@ function buildRecord(base, course, diff, scores, ghost) {
   const yourPoints = m.you, ghostPoints = m.opp;
   const result = yourPoints > 4.0001 ? "W" : yourPoints < 3.9999 ? "L" : "T";
   const rec = {
-    version: 2,
+    version: 3,
     id: base.id, date: base.date,
+    // v3: when this record last changed — the tiebreaker when the same round
+    // exists on two devices. Set on every build, including an inline edit.
+    updatedAt: Date.now(),
     course: course.name, tee: course.tee, ratingSlope: `${course.rating}/${course.slope}`,
     // v2: rating/slope/par and the per-hole card as NUMBERS, so the round can score its
     // own differential later without re-parsing the display string.
@@ -962,6 +969,150 @@ function Summary({ course, ghost, scores, history, onEditScore, onReset }) {
   );
 }
 
+/* ---------- cloud sync (Firebase Auth + Firestore) ----------
+   Local-first by design: localStorage stays the read path, so the app opens
+   instantly and a round can be played and finalized with no signal at all. When
+   signed in, each round mirrors to users/{uid}/rounds/{id}; Firestore's own
+   offline cache queues writes made in a dead zone and flushes them on reconnect.
+   Merge is by id with last-write-wins on updatedAt. Deletes are tombstones, so
+   deleting on one device doesn't get undone by a stale copy on another. */
+const FIREBASE_CONFIG = {
+  apiKey: "AIzaSyDkKB_5MjvKRDQYdi6VPpARkkM5Gkx1jvE",
+  authDomain: "ghost-match-cd04d.firebaseapp.com",
+  projectId: "ghost-match-cd04d",
+  storageBucket: "ghost-match-cd04d.firebasestorage.app",
+  messagingSenderId: "46156778167",
+  appId: "1:46156778167:web:e54c74a6d907c14f2b5b32",
+};
+const TOMB_KEY = "bogeyman-matches:tombstones:v1";
+
+let fb = null;
+/* Lazy so a Firebase failure can never stop the golf app from loading. */
+function initCloud() {
+  if (fb !== null) return fb || null;
+  try {
+    const app = initializeApp(FIREBASE_CONFIG);
+    const auth = getAuth(app);
+    const db = initializeFirestore(app, {
+      localCache: persistentLocalCache({ tabManager: persistentSingleTabManager() }),
+    });
+    fb = { app, auth, db };
+  } catch (e) { fb = false; }
+  return fb || null;
+}
+/* An installed iOS PWA has no reliable popup window; redirect is the supported
+   path there. Popup elsewhere keeps you in the page. */
+const isStandalone = () =>
+  (window.matchMedia && window.matchMedia("(display-mode: standalone)").matches) ||
+  window.navigator.standalone === true;
+
+async function cloudSignIn() {
+  const c = initCloud();
+  if (!c) throw new Error("cloud unavailable");
+  const provider = new GoogleAuthProvider();
+  if (isStandalone()) return signInWithRedirect(c.auth, provider);
+  try { return await signInWithPopup(c.auth, provider); }
+  catch (e) {
+    const code = (e && e.code) || "";
+    if (/popup-blocked|popup-closed|operation-not-supported|cancelled-popup/.test(code)) {
+      return signInWithRedirect(c.auth, provider);
+    }
+    throw e;
+  }
+}
+const cloudSignOut = () => { const c = initCloud(); if (c) fbSignOut(c.auth).catch(() => {}); };
+
+const stampOf = (r) => (r && typeof r.updatedAt === "number" ? r.updatedAt : Date.parse(r && r.date) || 0);
+const roundDoc = (c, uid, id) => doc(c.db, "users", uid, "rounds", id);
+async function cloudFetchAll(c, uid) {
+  const snap = await getDocs(collection(c.db, "users", uid, "rounds"));
+  const out = []; snap.forEach(d => out.push(d.data())); return out;
+}
+const cloudPut = (c, uid, rec) => setDoc(roundDoc(c, uid, rec.id), rec);
+
+/* Union local + cloud by id, newest updatedAt wins, tombstones drop out of the
+   active list but survive as markers. toPush is what the cloud is missing or
+   holds an older copy of. */
+function mergeRounds(local, localTombs, cloudDocs) {
+  const byId = new Map();
+  const put = (r, from) => {
+    const hit = byId.get(r.id);
+    if (!hit || stampOf(r) >= stampOf(hit.r)) byId.set(r.id, { r, from });
+  };
+  (cloudDocs || []).forEach(r => { if (r && r.id) put(r, "cloud"); });
+  (local || []).forEach(r => { if (r && r.id) put(r, "local"); });
+  (localTombs || []).forEach(t => { if (t && t.id) put({ id: t.id, deleted: true, updatedAt: t.updatedAt }, "local"); });
+  const all = [...byId.values()];
+  return {
+    merged: all.filter(x => !x.r.deleted).map(x => x.r).sort((a, b) => new Date(a.date) - new Date(b.date)),
+    tombs: all.filter(x => x.r.deleted).map(x => ({ id: x.r.id, updatedAt: stampOf(x.r) })),
+    toPush: all.filter(x => x.from === "local").map(x => x.r),
+  };
+}
+
+/* off | signed-out | syncing | synced | error */
+function useCloudSync(history, setHistory, tombs, setTombs) {
+  const [user, setUser] = useState(null);
+  const [status, setStatus] = useState("off");
+  const pushed = React.useRef(new Map());   // id -> updatedAt already accepted by the server
+  const ready = React.useRef(false);
+  const stateRef = React.useRef({ history, tombs });
+  stateRef.current = { history, tombs };
+
+  useEffect(() => {
+    const c = initCloud();
+    if (!c) { setStatus("error"); return; }
+    getRedirectResult(c.auth).catch(() => {});   // completes an iOS redirect sign-in
+    return onAuthStateChanged(c.auth, (u) => {
+      setUser(u || null);
+      if (!u) { ready.current = false; pushed.current = new Map(); setStatus("signed-out"); }
+    });
+  }, []);
+
+  // One reconcile per sign-in: pull everything, merge, push what's only local.
+  useEffect(() => {
+    if (!user) return;
+    const c = initCloud(); if (!c) return;
+    let alive = true;
+    setStatus("syncing");
+    (async () => {
+      try {
+        const cloud = await cloudFetchAll(c, user.uid);
+        if (!alive) return;
+        const { history: h, tombs: t } = stateRef.current;
+        const m = mergeRounds(h, t, cloud);
+        cloud.forEach(r => pushed.current.set(r.id, stampOf(r)));
+        setHistory(m.merged); setTombs(m.tombs);
+        for (const r of m.toPush) { await cloudPut(c, user.uid, r); pushed.current.set(r.id, stampOf(r)); }
+        if (!alive) return;
+        ready.current = true; setStatus("synced");
+      } catch (e) { if (alive) { ready.current = true; setStatus("error"); } }
+    })();
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user]);
+
+  // Mirror later changes (a finalized round, an inline edit, a delete).
+  useEffect(() => {
+    if (!user || !ready.current) return;
+    const c = initCloud(); if (!c) return;
+    const pending = [];
+    history.forEach(r => { if (r && r.id && pushed.current.get(r.id) !== stampOf(r)) pending.push(r); });
+    tombs.forEach(t => {
+      if (t && t.id && pushed.current.get(t.id) !== t.updatedAt) pending.push({ id: t.id, deleted: true, updatedAt: t.updatedAt });
+    });
+    if (!pending.length) return;
+    let alive = true;
+    setStatus("syncing");
+    Promise.all(pending.map(r => cloudPut(c, user.uid, r).then(() => pushed.current.set(r.id, stampOf(r)))))
+      .then(() => { if (alive) setStatus("synced"); })
+      .catch(() => { if (alive) setStatus("error"); });
+    return () => { alive = false; };
+  }, [history, tombs, user]);
+
+  return { user, status };
+}
+
 /* ---------- backup: export / import rounds as JSON ----------
    History lives only in localStorage, and since v14 the differential is derived from it,
    so a cache wipe would reset the ghost's calibration too. Until durable cloud stats
@@ -1009,7 +1160,7 @@ const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "
 const fmtDate = (iso) => { const d = new Date(iso); return isNaN(d) ? "" : `${MONTHS[d.getMonth()]} ${d.getDate()}`; };
 const resColor = (r) => r === "W" ? C.green : r === "L" ? C.red : C.slate;
 
-function History({ history, stats, onDelete, onImport, onBack }) {
+function History({ history, stats, cloud, onDelete, onImport, onBack }) {
   const [confirmId, setConfirmId] = useState(null);
   const [msg, setMsg] = useState("");
   const fileRef = React.useRef(null);
@@ -1019,6 +1170,32 @@ function History({ history, stats, onDelete, onImport, onBack }) {
     const r = await exportRounds(history);
     if (r) setMsg(`${r} ${history.length} round${history.length === 1 ? "" : "s"}.`);
   };
+  /* cloud status, rendered from the hook's state */
+  const cu = (cloud && cloud.user) || null;
+  const cstatus = (cloud && cloud.status) || "off";
+  const signedIn = !!cu;
+  const [busy, setBusy] = useState(false);
+  const doSignIn = async () => {
+    setBusy(true); setMsg("");
+    try { await cloudSignIn(); }
+    catch (e) { setMsg("Couldn't sign in — " + ((e && e.code) || "try again")); }
+    finally { setBusy(false); }
+  };
+  const syncDot =
+    cstatus === "synced" ? C.green :
+    cstatus === "syncing" ? C.slate :
+    cstatus === "error" ? C.red : C.line;
+  const syncTitle =
+    !signedIn ? "Not backed up" :
+    cstatus === "synced" ? "Backed up" :
+    cstatus === "syncing" ? "Syncing…" :
+    cstatus === "error" ? "Sync problem" : "Connecting…";
+  const syncNote =
+    !signedIn ? "Sign in once. Rounds then save themselves — and survive a wipe." :
+    cstatus === "error" ? "Saved on this phone. Will retry when you're back online." :
+    cstatus === "syncing" ? `${history.length} round${history.length === 1 ? "" : "s"} · ${cu.email || "signed in"}` :
+    `${history.length} round${history.length === 1 ? "" : "s"} · ${cu.email || "signed in"}`;
+
   const doImport = (e) => {
     const f = e.target.files && e.target.files[0];
     e.target.value = "";                       // let the same file be picked again
@@ -1070,16 +1247,36 @@ function History({ history, stats, onDelete, onImport, onBack }) {
         );
       })}
 
-      {/* backup — rounds live only on this phone until cloud stats land */}
+      {/* cloud sync — the durable copy; export/import below is the manual fallback */}
       <div style={{ marginTop: 22, paddingTop: 18, borderTop: `1px solid ${C.line}` }}>
-        <div style={{ ...lbl, marginBottom: 8 }}>BACKUP</div>
+        <div style={{ ...lbl, marginBottom: 8 }}>CLOUD BACKUP</div>
+        <div style={{ background: C.card, border: `1px solid ${C.line}`, borderRadius: 14, padding: "12px 14px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <div style={{ width: 8, height: 8, borderRadius: 4, background: syncDot, flexShrink: 0 }} />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ color: C.ink, fontWeight: 700, fontSize: 13 }}>{syncTitle}</div>
+              <div style={{ color: C.sub, fontSize: 11, marginTop: 2, lineHeight: 1.4, overflowWrap: "anywhere" }}>{syncNote}</div>
+            </div>
+            {signedIn ? (
+              <button onClick={cloudSignOut} style={{ color: C.sub, fontSize: 11, fontWeight: 800, letterSpacing: 0.5, background: "none", flexShrink: 0 }}>SIGN OUT</button>
+            ) : (
+              <button onClick={doSignIn} disabled={busy} style={{ height: 34, padding: "0 14px", borderRadius: 9, background: C.green, color: "#07140C", fontWeight: 800, fontSize: 12, flexShrink: 0, opacity: busy ? 0.6 : 1 }}>
+                {busy ? "…" : "Turn on"}
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <div style={{ marginTop: 18 }}>
+        <div style={{ ...lbl, marginBottom: 8 }}>MANUAL BACKUP</div>
         <div style={{ display: "flex", gap: 10 }}>
           <button onClick={doExport} style={{ flex: 1, height: 46, borderRadius: 13, background: C.card, color: C.ink, border: `1px solid ${C.line}`, fontWeight: 800, fontSize: 14 }}>Export rounds</button>
           <button onClick={() => fileRef.current && fileRef.current.click()} style={{ flex: 1, height: 46, borderRadius: 13, background: C.card, color: C.ink, border: `1px solid ${C.line}`, fontWeight: 800, fontSize: 14 }}>Import</button>
         </div>
         <input ref={fileRef} type="file" accept="application/json,.json" onChange={doImport} style={{ display: "none" }} />
         <div style={{ color: msg ? C.ink : C.sub, fontSize: 11, marginTop: 8, lineHeight: 1.45 }}>
-          {msg || "Your rounds live on this phone only. Export saves them to Files/iCloud; import merges a backup back in without touching rounds you already have."}
+          {msg || "A file copy you control. Export saves to Files/iCloud; import merges a backup back in without touching rounds you already have."}
         </div>
       </div>
     </div>
@@ -1129,6 +1326,17 @@ function loadHistory() {
 function saveHistory(h) {
   try { localStorage.setItem(HIST_KEY, JSON.stringify(h)); } catch (e) { /* quota / private mode */ }
 }
+/* Deleted rounds leave a marker so the delete replicates instead of being undone
+   by a stale copy still sitting in the cloud. */
+function loadTombs() {
+  try {
+    const a = JSON.parse(localStorage.getItem(TOMB_KEY) || "[]");
+    return Array.isArray(a) ? a.filter(t => t && typeof t.id === "string") : [];
+  } catch (e) { return []; }
+}
+function saveTombs(t) {
+  try { localStorage.setItem(TOMB_KEY, JSON.stringify(t)); } catch (e) { /* quota */ }
+}
 
 /* ---------- app ---------- */
 function App() {
@@ -1140,8 +1348,11 @@ function App() {
   const [hole, setHole] = useState(initial.hole);
   const [roundId, setRoundId] = useState(initial.roundId);
   const [history, setHistory] = useState(loadHistory());
+  const [tombs, setTombs] = useState(loadTombs());
+  const cloud = useCloudSync(history, setHistory, tombs, setTombs);
   useEffect(() => { saveState({ screen, course, diff, scores, hole, roundId }); }, [screen, course, diff, scores, hole, roundId]);
   useEffect(() => { saveHistory(history); }, [history]);
+  useEffect(() => { saveTombs(tombs); }, [tombs]);
   const ghost = useMemo(() => course ? computeGhost(course, diff) : null, [course, diff]);
   const stats = useMemo(() => deriveStats(history), [history]);
   const start = () => { if (!course) return; setScores(Array(18).fill(null)); setHole(0); setRoundId(null); setScreen("play"); };
@@ -1162,7 +1373,11 @@ function App() {
   };
   const reset = () => { setRoundId(null); setScreen("setup"); };
   // Delete a stored round so test rounds never pollute the record.
-  const deleteRound = (id) => { setHistory(h => h.filter(r => r.id !== id)); if (id === roundId) setRoundId(null); };
+  const deleteRound = (id) => {
+    setHistory(h => h.filter(r => r.id !== id));
+    setTombs(t => [...t.filter(x => x.id !== id), { id, updatedAt: Date.now() }]);
+    if (id === roundId) setRoundId(null);
+  };
   // Restore a backup: merge by id so an old export can never delete newer rounds, and
   // keep history in date order (deriveStats reads the streak off the end).
   const importRounds = (incoming) => {
@@ -1177,7 +1392,7 @@ function App() {
       {screen === "setup" && <Setup course={course} setCourse={setCourse} diff={diff} setDiff={setDiff} stats={stats} history={history} onStart={start} onHistory={() => setScreen("history")} />}
       {screen === "play" && course && ghost && <Play course={course} ghost={ghost} scores={scores} setScores={setScores} hole={hole} setHole={setHole} onFinish={finalize} onExit={exitRound} />}
       {screen === "summary" && course && ghost && <Summary course={course} ghost={ghost} scores={scores} history={history} onEditScore={editScore} onReset={reset} />}
-      {screen === "history" && <History history={history} stats={stats} onDelete={deleteRound} onImport={importRounds} onBack={() => setScreen("setup")} />}
+      {screen === "history" && <History history={history} stats={stats} cloud={cloud} onDelete={deleteRound} onImport={importRounds} onBack={() => setScreen("setup")} />}
     </div>
   );
 }
