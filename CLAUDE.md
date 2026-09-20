@@ -11,7 +11,11 @@ A self-contained single-page web app (golf side game). Brett plays head-to-head 
 - `build.sh` — rebuild script. Run after every edit to src/app.jsx to regenerate index.html.
 - `sw.js` — service worker (network-first since v13: online you get the latest bundle, offline it falls back to cache). Has a versioned cache name.
 - `manifest.webmanifest` — PWA manifest. `icon-512.png` — app icon.
-- `package.json` — build deps ONLY (the Firebase SDK). React still ships as an inlined UMD file. `node_modules/` is gitignored; run `npm install` in a fresh clone before `./build.sh`.
+- `src/caddie.js` — the Caddie engine (v18): pure functions, profile passed in. `src/profile.json` is Brett's game (hand-refreshed from Shot Pattern exports, see docs/HANDOFF-caddie.md). Tests: `src/caddie.test.js`.
+- `src/geometry.js` — hole geometry (v18.5/v19): haversine, point-in-polygon, front/middle/back, Overpass parser, auto phase, dispersion ellipse, tile math. Tests: `src/geometry.test.js` (uses the real Hampton OSM fixture in `src/fixtures/`).
+- `src/holeMap.jsx` — the Hole View (v19): MapLibre + MapTiler satellite + offline tile pre-fetch. The MapTiler key lives here (client-side, origin-locked).
+- `vendor/` — MapLibre GL dist files, COMMITTED (Pages serves them; the service worker caches them). `./build.sh` refreshes them from `node_modules` when present.
+- `package.json` — build deps (the Firebase SDK, MapLibre for `vendor/`) and `npm test` (node's test runner over `src/*.test.js`). React still ships as an inlined UMD file. `node_modules/` is gitignored; run `npm install` in a fresh clone before `./build.sh`.
 
 ## How to ship a change (deploy loop)
 1. Edit `src/app.jsx`.
@@ -36,6 +40,15 @@ A self-contained single-page web app (golf side game). Brett plays head-to-head 
 - Scoring per 18 (low score wins each): six 3-hole segments (1 pt, tie 0.5), Front-9 (0.5), Back-9 (0.5), Total-18 (1.0). 8 points total.
 - The differential stepper on Setup adjusts by 0.1.
 
+## Caddie + Hole View (v18–v19)
+- Two screens with a toggle: Play (ghost) and Caddie (club, aim, why + map). A round opens on the Caddie. Both read the same `hole`/`scores`.
+- The ghost is a status line on the Caddie card, never an input to the engine. Test #10 in `src/caddie.test.js` enforces it.
+- Every why-note cites a number from `src/profile.json`. Zones are half-open (`from <= d < to`).
+- GPS (`watchPosition`) + hole geometry pick the phase (spec §4.3) and fill the distance; the TEE/APPROACH/SHORT/PUTT chips are the fallback when there is no fix or no green. Putts are typed.
+- Hole geometry comes from OpenStreetMap via Overpass, GEOMETRY ONLY (par/SI stay with golfcourseapi), fetched once when a course is picked and cached in `bogeyman-matches:geo:v1:{apiId}`. The public Overpass instance 429s by IP; `lz4.overpass-api.de` is tried first. No OSM green → stand on it and tap to mark (`bogeyman-matches:greens:v1`).
+- Satellite tiles are cache-first in `sw.js` (`bogeyman-tiles-v1`, kept across version bumps). Save them on wifi from Setup before the round.
+- Run `npm test` before shipping anything in `src/`.
+
 ## Course data format
 Entries in the COURSES array use `mk(pars, strokeIndex)`:
 `{ id, name, tee, rating, slope, par, holes: mk([18 pars],[18 stroke indexes]) }`
@@ -43,7 +56,7 @@ Entries in the COURSES array use `mk(pars, strokeIndex)`:
 - Alternate nine routings (e.g. Mill/School vs School/Mill) are separate entries with the nines reordered, each hole keeping its own par + stroke index.
 
 ## Persistence
-- In-progress round state -> localStorage `bogeyman-matches:v1`, restored on load.
+- In-progress round state -> localStorage `bogeyman-matches:v1`, restored on load (includes round-level caddie flags `wet`/`wind`). Per-course caddie data: `bogeyman-matches:caddie-flags:v1` (tight/water per hole), `bogeyman-matches:greens:v1` (marked greens), `bogeyman-matches:geo:v1:{apiId}` (OSM geometry).
 - Finished rounds -> localStorage `bogeyman-matches:history:v1`. Deleted rounds leave a
   tombstone in `bogeyman-matches:tombstones:v1` so a delete replicates instead of being
   undone by a stale cloud copy.

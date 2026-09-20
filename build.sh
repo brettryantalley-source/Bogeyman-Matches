@@ -21,6 +21,14 @@ fi
 [ -f build/react.min.js ]     || curl -sSLo build/react.min.js     https://unpkg.com/react@18.3.1/umd/react.production.min.js
 [ -f build/react-dom.min.js ] || curl -sSLo build/react-dom.min.js https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js
 
+# 1b. MapLibre GL (v19) is served same-origin from vendor/ so the service worker can cache it.
+#     Refresh the committed copies from node_modules when present (pinned in package.json).
+if [ -f node_modules/maplibre-gl/dist/maplibre-gl.js ]; then
+  cp node_modules/maplibre-gl/dist/maplibre-gl.js vendor/maplibre-gl.js
+  cp node_modules/maplibre-gl/dist/maplibre-gl.css vendor/maplibre-gl.css
+  cp node_modules/maplibre-gl/LICENSE.txt vendor/maplibre-gl.LICENSE.txt
+fi
+
 # 2. Bundle app.
 "${ESBUILD[@]}" src/app.jsx \
   --loader:.jsx=jsx --jsx=transform \
@@ -47,11 +55,16 @@ html = f"""<!doctype html>
 <link rel="manifest" href="./manifest.webmanifest" />
 <link rel="apple-touch-icon" href="./icon-512.png" />
 <link rel="icon" type="image/png" sizes="512x512" href="./icon-512.png" />
+<link rel="stylesheet" href="./vendor/maplibre-gl.css" />
 <title>Ghost Match</title>
 <style>
 html,body{{margin:0;background:#000;color:#fff;overscroll-behavior:none}}
 body{{font-family:-apple-system,ui-sans-serif,'SF Pro Text',system-ui,sans-serif}}
 #root{{min-height:100dvh;background:#000}}
+.maplibregl-ctrl-attrib{{font-size:9px!important;background:rgba(0,0,0,.55)!important;color:#8A8F98!important}}
+.maplibregl-ctrl-attrib a{{color:#8A8F98!important}}
+.maplibregl-ctrl-bottom-right{{right:0}}
+.maplibregl-canvas{{outline:none}}
 </style>
 </head>
 <body>
@@ -62,6 +75,7 @@ body{{font-family:-apple-system,ui-sans-serif,'SF Pro Text',system-ui,sans-serif
 <script>/* ReactDOM 18 UMD (production) */
 {react_dom}
 </script>
+<script defer src="./vendor/maplibre-gl.js"></script>
 <script>/* Ghost Match app bundle */
 {app}
 </script>

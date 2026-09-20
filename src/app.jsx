@@ -4,6 +4,7 @@ import { initializeFirestore, persistentLocalCache, persistentSingleTabManager, 
 import { advise } from "./caddie.js";
 import PROFILE from "./profile.json";
 import { greenDistances, autoPhase, fetchGeometry, compactGeometry } from "./geometry.js";
+import { HoleMap, prefetchTiles, tileCacheStatus } from "./holeMap.jsx";
 
 const React = window.React;
 const { useState, useMemo, useEffect } = React;
@@ -36,7 +37,7 @@ const MapPin = (p) => <Icon {...p}><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0
 const X = (p) => <Icon {...p}><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></Icon>;
 
 /* build tag — bump alongside the sw.js cache version so a deploy is confirmable on-screen */
-const BUILD = "v18.5 · Sep 19";
+const BUILD = "v19 · Sep 19";
 
 /* palette — Shot Pattern dark */
 const C = {
@@ -369,6 +370,22 @@ const stepBtn = { width: 54, height: 54, borderRadius: 15, background: C.card2, 
 const lbl = { color: C.sub, fontSize: 11, fontWeight: 800, letterSpacing: 1 };
 
 /* ---------- setup (one screen: search course · pick tee · differential · start) ---------- */
+/* Satellite for offline (v19): the course's tiles at z16–19 into the tile cache, on wifi, before the round. */
+function TileCacheLine({ geo }) {
+  const [st, setSt] = useState(null);          // { have, total }
+  const [prog, setProg] = useState(null);      // { done, total, ok } while fetching
+  useEffect(() => { let live = true; tileCacheStatus(geo).then(r => { if (live) setSt(r); }); return () => { live = false; }; }, [geo]);
+  const run = () => {
+    if (prog) return;
+    setProg({ done: 0, total: 0, ok: 0 });
+    prefetchTiles(geo, setProg).then(r => { setProg(null); setSt({ have: r.ok, total: r.total }); }).catch(() => setProg(null));
+  };
+  if (!st) return null;
+  const full = st.total > 0 && st.have >= st.total;
+  const label = prog ? `Saving satellite… ${prog.done}/${prog.total}` : full ? `Satellite saved for offline · ${st.total} tiles` : `Satellite offline · ${st.have}/${st.total} tiles — tap to save on wifi`;
+  return <button onClick={full ? undefined : run} style={{ display: "block", color: full ? C.green : C.sub, fontSize: 11, marginTop: 3, textAlign: "left", ...tnum }}>{label}</button>;
+}
+
 function Setup({ course, setCourse, diff, setDiff, stats, history, onStart, onHistory, geometry }) {
   /* --- course search (golfcourseapi, debounced) --- */
   const [query, setQuery] = useState("");
@@ -593,8 +610,9 @@ function Setup({ course, setCourse, diff, setDiff, stats, history, onStart, onHi
               <div style={{ color: C.ink, fontWeight: 700, fontSize: 14, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{course.name}<span style={{ color: C.sub, fontWeight: 600 }}> · {course.tee}</span></div>
               <div style={{ color: C.sub, fontSize: 11, marginTop: 3, ...tnum }}>Ghost plays to {g.hcp} · par {course.par} · {course.rating}/{course.slope}</div>
               {geometry && geoStatusText(geometry.geo, geometry.status) && (
-                <button onClick={geometry.status === "error" ? geometry.retry : undefined} style={{ color: geometry.status === "ok" ? C.green : C.sub, fontSize: 11, marginTop: 3, textAlign: "left", ...tnum }}>{geoStatusText(geometry.geo, geometry.status)}</button>
+                <button onClick={geometry.status === "error" ? geometry.retry : undefined} style={{ display: "block", color: geometry.status === "ok" ? C.green : C.sub, fontSize: 11, marginTop: 3, textAlign: "left", ...tnum }}>{geoStatusText(geometry.geo, geometry.status)}</button>
               )}
+              {geometry && geometry.status === "ok" && geometry.geo && <TileCacheLine geo={geometry.geo} />}
             </div>
             <GhostRing value={g.gross} size={58} />
           </div>
@@ -910,6 +928,7 @@ const PHASE_ORDER = PHASES.map(p => p[0]);
 const HOLE_FLAGS = [["tight", "tight"], ["waterL", "water L"], ["waterR", "water R"]];
 const ROUND_FLAGS = [["wet", "wet"], ["wind", "wind"]];
 const clubName = (id) => (PROFILE.clubs.find(c => c.id === id) || { name: id }).name;
+const MAP_H = Math.round(Math.min(340, Math.max(220, (typeof window !== "undefined" ? window.innerHeight : 800) * 0.36)));
 
 function Chip({ on, onClick, children, tone = "ink", dim, small }) {
   const bg = on ? (tone === "green" ? C.green : tone === "slate" ? C.slate : C.ink) : C.card2;
@@ -1003,6 +1022,9 @@ function Caddie({ course, ghost, hole, setHole, scores, roundFlags, setRoundFlag
       </div>
       {confirmExit && <LeaveSheet hole={hole} onStay={() => setConfirmExit(false)} onLeave={() => { setConfirmExit(false); onExit(); }} />}
 
+      {/* the hole, hole-up: satellite, trouble, green outline, your landing ellipse for the shown club */}
+      <HoleMap fix={fix} hole={osmHole} green={green} trouble={(geo && geo.trouble) || []} club={PROFILE.clubs.find(c => c.id === selected) || null} phase={phase} height={MAP_H} />
+
       {/* where you are — GPS picks the phase; tap the line to override, AUTO to hand it back */}
       {auto ? (
         <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
@@ -1029,7 +1051,7 @@ function Caddie({ course, ghost, hole, setHole, scores, roundFlags, setRoundFlag
 
       {/* distance — GPS fills it, typing overrides it (a laser beats GPS) */}
       <div style={{ position: "relative" }}>
-        <input type="number" inputMode="decimal" min="1" value={dist} onChange={(e) => { setDistOverride(e.target.value); setAlt(null); }} placeholder={phase === "putt" ? (live ? `GPS ~${Math.round(live.middle * 3)} ft — type it` : "first putt, feet") : "yards"} aria-label={`Distance in ${unit}`}
+        <input type="number" inputMode="decimal" min="1" value={dist} onChange={(e) => { setDistOverride(e.target.value); setAlt(null); }} placeholder={phase === "putt" ? "feet" : "yards"} aria-label={`Distance in ${unit}`}
           style={{ width: "100%", background: C.card, color: distOverride != null ? C.ink : (gpsDist != null ? C.green : C.ink), border: `1px solid ${C.line}`, borderRadius: 16, fontFamily: NUM, fontSize: 46, fontWeight: 800, padding: "10px 64px 10px 18px", textAlign: "center", outline: "none", ...tnum }} />
         <div style={{ position: "absolute", right: 18, top: "50%", transform: "translateY(-50%)", color: C.sub, fontSize: 12, fontWeight: 800, letterSpacing: 1, textAlign: "right" }}>
           {unit.toUpperCase()}
@@ -1055,7 +1077,7 @@ function Caddie({ course, ghost, hole, setHole, scores, roundFlags, setRoundFlag
 
       {/* the card */}
       <div style={{ background: C.card, borderRadius: 18, padding: "16px 18px", border: `1px solid ${C.line}`, borderLeft: `4px solid ${gradeColor}` }}>
-        {!advice && <div style={{ color: C.sub, fontSize: 14, lineHeight: 1.4 }}>{phase === "putt" ? "Type the first-putt distance in feet." : "Type the distance in yards."}</div>}
+        {!advice && <div style={{ color: C.sub, fontSize: 14, lineHeight: 1.4 }}>{phase === "putt" ? `Type the first-putt distance in feet.${live ? ` GPS puts the middle of the green at ~${Math.round(live.middle * 3)} ft, but GPS cannot read feet.` : ""}` : "Type the distance in yards."}</div>}
         {advice && (
           <>
             {advice.club && (

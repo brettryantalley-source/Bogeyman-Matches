@@ -220,6 +220,83 @@ export function autoPhase(distYds, holeYards, insideGreen) {
   return "approach";
 }
 
+/* ---------- dispersion ellipse (spec §4.4) ---------- */
+
+/**
+ * 48-point ellipse centred `alongYds` yards from `player` on `bearing`, semi-axes depth/2 (along)
+ * and width/2 (across), in yards. Returns { center, ring } in lon/lat.
+ */
+export function ellipsePolygon(player, bearing, alongYds, depthYds, widthYds, n = 48) {
+  const center = destination(player, bearing, alongYds / YARDS_PER_METER);
+  const a = depthYds / 2 / YARDS_PER_METER, b = widthYds / 2 / YARDS_PER_METER;
+  const ring = [];
+  for (let i = 0; i < n; i++) {
+    const t = (2 * Math.PI * i) / n;
+    const along = a * Math.cos(t), across = b * Math.sin(t);
+    const dist = Math.hypot(along, across);
+    const ang = (bearing + deg(Math.atan2(across, along)) + 360) % 360;
+    ring.push(destination(center, ang, dist));
+  }
+  return { center, ring };
+}
+
+/** Trouble polygons whose centroid lies within `withinM` metres of any point on the hole line or the green. */
+export function troubleNearHole(trouble, hole, withinM = 250) {
+  const pts = [...(hole?.line || []), hole?.green?.center].filter(Boolean);
+  if (!pts.length) return [];
+  return trouble.filter((t) => {
+    const c = t.center || centroid(t.ring);
+    return pts.some((p) => haversineM(p, c) <= withinM);
+  });
+}
+
+/**
+ * The club's landing ellipse with each rim point tested against trouble.
+ * club = { median, depth80, width80 }. Returns { center, ring, samples: [{ lat, lon, trouble: kind|null }], troublePct }.
+ */
+export function dispersion(player, bearing, club, trouble) {
+  const depth = club.depth80 ?? Math.max(20, (club.p75 ?? club.median + 10) - (club.p25 ?? club.median - 10)) * 1.5;
+  const width = club.width80 ?? depth * 0.6;
+  const { center, ring } = ellipsePolygon(player, bearing, club.median, depth, width);
+  const samples = ring.map((p) => {
+    const hit = trouble.find((t) => pointInRing(p, t.ring));
+    return { lat: p.lat, lon: p.lon, trouble: hit ? hit.kind : null };
+  });
+  const bad = samples.filter((s) => s.trouble).length;
+  return { center, ring, samples, troublePct: bad / samples.length, depth, width };
+}
+
+/* ---------- slippy-map tile math (for the offline tile cache) ---------- */
+
+export function lonLatToTile(lon, lat, z) {
+  const n = 2 ** z;
+  const x = Math.floor(((lon + 180) / 360) * n);
+  const latR = rad(lat);
+  const y = Math.floor(((1 - Math.log(Math.tan(latR) + 1 / Math.cos(latR)) / Math.PI) / 2) * n);
+  return { x: Math.min(n - 1, Math.max(0, x)), y: Math.min(n - 1, Math.max(0, y)), z };
+}
+
+/** Bounding box { minLat, minLon, maxLat, maxLon } of every hole line and green ring, padded by `padM` metres. */
+export function geometryBbox(geo, padM = 60) {
+  let minLat = Infinity, minLon = Infinity, maxLat = -Infinity, maxLon = -Infinity;
+  const take = (p) => { if (!p) return; minLat = Math.min(minLat, p.lat); maxLat = Math.max(maxLat, p.lat); minLon = Math.min(minLon, p.lon); maxLon = Math.max(maxLon, p.lon); };
+  for (const h of Object.values(geo?.holes || {})) { (h.line || []).forEach(take); (h.green?.ring || []).forEach(take); take(h.green?.center); }
+  if (!Number.isFinite(minLat)) return null;
+  const sw = destination(destination({ lat: minLat, lon: minLon }, 180, padM), 270, padM);
+  const ne = destination(destination({ lat: maxLat, lon: maxLon }, 0, padM), 90, padM);
+  return { minLat: sw.lat, minLon: sw.lon, maxLat: ne.lat, maxLon: ne.lon };
+}
+
+/** Every tile {x,y,z} covering bbox for each zoom in `zooms`. */
+export function tilesForBbox(bbox, zooms) {
+  const out = [];
+  for (const z of zooms) {
+    const a = lonLatToTile(bbox.minLon, bbox.maxLat, z), b = lonLatToTile(bbox.maxLon, bbox.minLat, z);
+    for (let x = a.x; x <= b.x; x++) for (let y = a.y; y <= b.y; y++) out.push({ x, y, z });
+  }
+  return out;
+}
+
 /** Serialise a parsed geometry for localStorage — small, no OSM ids needed. */
 export function compactGeometry(geo) {
   const holes = {};
