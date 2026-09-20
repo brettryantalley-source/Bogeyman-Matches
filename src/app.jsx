@@ -33,7 +33,7 @@ const MapPin = (p) => <Icon {...p}><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0
 const X = (p) => <Icon {...p}><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></Icon>;
 
 /* build tag — bump alongside the sw.js cache version so a deploy is confirmable on-screen */
-const BUILD = "v16 · Sep 19";
+const BUILD = "v17 · Sep 19";
 
 /* palette — Shot Pattern dark */
 const C = {
@@ -690,7 +690,18 @@ function Play({ course, ghost, scores, setScores, hole, setHole, onFinish, onExi
   const [confirmExit, setConfirmExit] = useState(false);
   const m = useMemo(() => evalMatch(scores, ghost.holes), [scores, ghost]);
   const h = course.holes[hole], gh = ghost.holes[hole];
-  const setVal = (v) => setScores(prev => { const n = [...prev]; n[hole] = Math.max(1, v); return n; });
+  /* Tap a score -> log it, then hand over the next hole. The short pause lets the
+     "logged ✓" confirmation register before the dial swaps to the new par; the
+     guard means a hole you picked yourself mid-pause wins over the auto-advance. */
+  const advance = React.useRef(0);
+  useEffect(() => () => clearTimeout(advance.current), []);
+  const setVal = (v) => {
+    setScores(prev => { const n = [...prev]; n[hole] = Math.max(1, v); return n; });
+    if (hole < 17) {
+      clearTimeout(advance.current);
+      advance.current = setTimeout(() => setHole(h => (h === hole ? h + 1 : h)), 350);
+    }
+  };
   const lead = m.you - m.opp;
   const filled = scores.filter(s => s != null).length;
   const allIn = filled === 18;
