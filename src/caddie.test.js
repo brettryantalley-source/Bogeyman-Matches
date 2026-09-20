@@ -140,6 +140,18 @@ test("#5b short-miss rule: a stock club with shortPct ≥ 0.20 gets easy / back-
   assert.ok(has(a.why, /PW comes up short 33%\. Long almost never\. Back-center\./));
 });
 
+test("#5c tapping an approach alternative shows that club's card and cites both medians", () => {
+  const a = advise({ phase: "approach", distance: 140, lie: "fairway", forceClub: "8i" }, profile);
+  assert.equal(a.club, "8i");
+  assert.match(a.why[0], /130–150 is your best number/);
+  assert.match(a.why[1], /^8-iron median is 169 — 29 past 140\. Stock is 9-iron at 152\.$/);
+  const s = advise({ phase: "approach", distance: 140, lie: "fairway", forceClub: "PW" }, profile);
+  assert.equal(s.swing, "easy"); // PW shortPct 0.33 drives the swing even when forced
+  assert.match(s.why[1], /PW median is 136 — 4 short of 140/);
+  // a non-approach id is ignored
+  assert.equal(advise({ phase: "approach", distance: 140, forceClub: "Dr" }, profile).club, "9i");
+});
+
 test("#6 approach 108, fairway → GW, red zone, damage-control + center of the green", () => {
   const a = advise({ phase: "approach", distance: 108, lie: "fairway" }, profile);
   assert.equal(a.club, "GW");

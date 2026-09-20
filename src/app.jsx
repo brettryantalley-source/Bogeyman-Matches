@@ -1,6 +1,8 @@
 import { initializeApp } from "firebase/app";
 import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, onAuthStateChanged, signOut as fbSignOut } from "firebase/auth";
 import { initializeFirestore, persistentLocalCache, persistentSingleTabManager, collection, doc, setDoc, getDocs } from "firebase/firestore";
+import { advise } from "./caddie.js";
+import PROFILE from "./profile.json";
 
 const React = window.React;
 const { useState, useMemo, useEffect } = React;
@@ -33,7 +35,7 @@ const MapPin = (p) => <Icon {...p}><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0
 const X = (p) => <Icon {...p}><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></Icon>;
 
 /* build tag — bump alongside the sw.js cache version so a deploy is confirmable on-screen */
-const BUILD = "v17 · Sep 19";
+const BUILD = "v18 · Sep 19";
 
 /* palette — Shot Pattern dark */
 const C = {
@@ -113,7 +115,7 @@ function validCourse(c) {
     typeof c.rating === "number" && typeof c.slope === "number" && typeof c.par === "number";
 }
 
-/* ---------- home-state filter (results have state; the API has no geo/coords) ---------- */
+/* ---------- home-state filter (results have state; the API also returns location.latitude/longitude since v1.1 — used by the Hole View, not here) ---------- */
 const HOME_STATE_KEY = "bogeyman-matches:home-state";
 const GEO_URL = "https://api-bdc.io/data/reverse-geocode-client"; // free, no key, CORS-open reverse geocode
 const US_STATES = [
@@ -374,7 +376,7 @@ function Setup({ course, setCourse, diff, setDiff, stats, history, onStart, onHi
   const [loadState2, setLoadState2] = useState("idle");    // idle | loading | error
   const [pendingId, setPendingId] = useState(null);        // id being loaded (for retry)
 
-  /* home state: sort in-state courses first (the API has no coords, so no true "near me") */
+  /* home state: sort in-state courses first (a true "near me" would need the course coords the API now returns; kept as a state filter for the 50/day cap) */
   const [homeState, setHomeState] = useState(() => { try { return localStorage.getItem(HOME_STATE_KEY) || ""; } catch (e) { return ""; } });
   const [locating, setLocating] = useState(false);
   const [locMsg, setLocMsg] = useState("");
@@ -686,7 +688,7 @@ function ScoreDial({ par, si, ghost, value, onPick }) {
   );
 }
 
-function Play({ course, ghost, scores, setScores, hole, setHole, onFinish, onExit }) {
+function Play({ course, ghost, scores, setScores, hole, setHole, onFinish, onExit, onCaddie }) {
   const [confirmExit, setConfirmExit] = useState(false);
   const m = useMemo(() => evalMatch(scores, ghost.holes), [scores, ghost]);
   const h = course.holes[hole], gh = ghost.holes[hole];
@@ -730,6 +732,8 @@ function Play({ course, ghost, scores, setScores, hole, setHole, onFinish, onExi
             <div style={{ color: C.sub, fontSize: 11, ...tnum }}>{course.tee} · ghost {ghost.gross}</div>
           </div>
         </div>
+        {/* screen toggle — same slot on the Caddie header so it reads as one control */}
+        <button onClick={onCaddie} aria-label="Open caddie" style={togglePill}><Target size={14} /> CADDIE</button>
         <div style={{ textAlign: "right", flexShrink: 0 }}>
           <div style={{ ...lbl, fontSize: 10 }}>HOLE</div>
           <div style={{ fontFamily: NUM, fontWeight: 800, fontSize: 18, color: C.ink, ...tnum }}>{hole + 1}<span style={{ color: C.sub, fontSize: 12 }}>/18</span></div>
@@ -737,18 +741,7 @@ function Play({ course, ghost, scores, setScores, hole, setHole, onFinish, onExi
       </div>
 
       {/* exit confirmation */}
-      {confirmExit && (
-        <div onClick={() => setConfirmExit(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "flex-end", justifyContent: "center", zIndex: 60 }}>
-          <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 460, background: C.card, borderRadius: "20px 20px 0 0", border: `1px solid ${C.line}`, padding: "18px 18px calc(env(safe-area-inset-bottom) + 18px)" }}>
-            <div style={{ color: C.ink, fontWeight: 800, fontSize: 16, marginBottom: 4 }}>Leave this round?</div>
-            <div style={{ color: C.sub, fontSize: 13, marginBottom: 16 }}>You're on hole {hole + 1}. This round isn't finished, so it won't be saved to your record.</div>
-            <div style={{ display: "flex", gap: 10 }}>
-              <button onClick={() => setConfirmExit(false)} style={{ flex: 1, height: 50, borderRadius: 14, background: C.card2, color: C.ink, border: `1px solid ${C.line}`, fontWeight: 800, fontSize: 15 }}>Keep playing</button>
-              <button onClick={() => { setConfirmExit(false); onExit(); }} style={{ flex: 1, height: 50, borderRadius: 14, background: C.red, color: "#fff", fontWeight: 800, fontSize: 15 }}>Leave round</button>
-            </div>
-          </div>
-        </div>
-      )}
+      {confirmExit && <LeaveSheet hole={hole} onStay={() => setConfirmExit(false)} onLeave={() => { setConfirmExit(false); onExit(); }} />}
 
       {/* scoreboard */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: C.card, borderRadius: 16, padding: "9px 18px", flexShrink: 0 }}>
@@ -797,6 +790,176 @@ function Play({ course, ghost, scores, setScores, hole, setHole, onFinish, onExi
       {canFinalize && (
         <button onClick={doFinalize} style={{ flexShrink: 0, height: 50, borderRadius: 14, background: C.green, color: "#07140C", fontSize: 16, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}><Flag size={18} /> Finalize round</button>
       )}
+    </div>
+  );
+}
+
+/* ---------- shared: header toggle pill + leave-round sheet (Play and Caddie) ---------- */
+const togglePill = { height: 34, padding: "0 12px", borderRadius: 10, background: C.card2, color: C.ink, border: `1px solid ${C.line}`, display: "flex", alignItems: "center", gap: 6, fontSize: 11, fontWeight: 800, letterSpacing: 1, flexShrink: 0 };
+function LeaveSheet({ hole, onStay, onLeave }) {
+  return (
+    <div onClick={onStay} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "flex-end", justifyContent: "center", zIndex: 60 }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 460, background: C.card, borderRadius: "20px 20px 0 0", border: `1px solid ${C.line}`, padding: "18px 18px calc(env(safe-area-inset-bottom) + 18px)" }}>
+        <div style={{ color: C.ink, fontWeight: 800, fontSize: 16, marginBottom: 4 }}>Leave this round?</div>
+        <div style={{ color: C.sub, fontSize: 13, marginBottom: 16 }}>You're on hole {hole + 1}. This round isn't finished, so it won't be saved to your record.</div>
+        <div style={{ display: "flex", gap: 10 }}>
+          <button onClick={onStay} style={{ flex: 1, height: 50, borderRadius: 14, background: C.card2, color: C.ink, border: `1px solid ${C.line}`, fontWeight: 800, fontSize: 15 }}>Keep playing</button>
+          <button onClick={onLeave} style={{ flex: 1, height: 50, borderRadius: 14, background: C.red, color: "#fff", fontWeight: 800, fontSize: 15 }}>Leave round</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ---------- Caddie (v18) — club, aim and why, every note citing a number from src/profile.json ----------
+   Its own screen, toggled from Play. The engine is src/caddie.js; nothing here touches the ghost
+   beyond passing the hole's ghost score through as a status line (the engine never reads it). */
+const CADDIE_FLAGS_KEY = "bogeyman-matches:caddie-flags:v1";   // per-course, per-hole tight / water flags
+const courseKey = (course) => `${course.id ?? course.name}|${course.tee ?? ""}`;
+function loadHoleFlags(course) {
+  try { const all = JSON.parse(localStorage.getItem(CADDIE_FLAGS_KEY) || "{}"); const c = all[courseKey(course)]; return c && typeof c === "object" ? c : {}; } catch (e) { return {}; }
+}
+function saveHoleFlags(course, flags) {
+  try { const all = JSON.parse(localStorage.getItem(CADDIE_FLAGS_KEY) || "{}"); all[courseKey(course)] = flags; localStorage.setItem(CADDIE_FLAGS_KEY, JSON.stringify(all)); } catch (e) { /* quota */ }
+}
+const ZONE_COLOR = { green: C.green, amber: "#D4A94A", red: "#C9645E" };
+const PHASES = [["tee", "TEE"], ["approach", "APPROACH"], ["short", "SHORT"], ["putt", "PUTT"]];
+const HOLE_FLAGS = [["tight", "tight"], ["waterL", "water L"], ["waterR", "water R"]];
+const ROUND_FLAGS = [["wet", "wet"], ["wind", "wind"]];
+const clubName = (id) => (PROFILE.clubs.find(c => c.id === id) || { name: id }).name;
+
+function Chip({ on, onClick, children, tone = "ink", dim }) {
+  const bg = on ? (tone === "green" ? C.green : C.ink) : C.card2;
+  return (
+    <button onClick={onClick} style={{ height: 32, padding: "0 12px", borderRadius: 10, background: bg, color: on ? "#07140C" : (dim ? "#55595F" : C.sub), border: `1px solid ${on ? "transparent" : C.line}`, fontSize: 12, fontWeight: 800, letterSpacing: 0.5, whiteSpace: "nowrap", flexShrink: 0, textDecoration: dim ? "line-through" : "none", ...tnum }}>{children}</button>
+  );
+}
+
+function Caddie({ course, ghost, hole, setHole, scores, roundFlags, setRoundFlags, onPlay, onExit }) {
+  const h = course.holes[hole];
+  const par = h.par, yards = typeof h.yards === "number" ? h.yards : null;
+  const [phase, setPhase] = useState("tee");
+  const [dist, setDist] = useState(yards != null ? String(yards) : "");
+  const [lie, setLie] = useState("fairway");
+  const [alt, setAlt] = useState(null);             // manually tapped alternative club
+  const [holeFlagsAll, setHoleFlagsAll] = useState(() => loadHoleFlags(course));
+  const [confirmExit, setConfirmExit] = useState(false);
+  const holeFlags = holeFlagsAll[hole] || {};
+  const toggleHoleFlag = (k) => { const next = { ...holeFlagsAll, [hole]: { ...holeFlags, [k]: !holeFlags[k] } }; setHoleFlagsAll(next); saveHoleFlags(course, next); };
+  const toggleRoundFlag = (k) => setRoundFlags(f => ({ ...f, [k]: !f[k] }));
+  const pickPhase = (p) => { setPhase(p); setAlt(null); setDist(p === "tee" && yards != null ? String(yards) : ""); };
+  const filled = scores.filter(s => s != null).length;
+
+  const flags = { ...holeFlags, ...roundFlags };
+  const n = parseFloat(dist);
+  const distance = Number.isFinite(n) && n > 0 ? n : null;
+  const unit = phase === "putt" ? "ft" : "yds";
+  const ghostScore = ghost.holes[hole];
+  let advice = null;
+  try {
+    if (phase === "tee" && distance != null) advice = advise({ phase: "tee", par, yards: distance, flags, forceClub: alt, ghost: ghostScore }, PROFILE);
+    else if (phase === "approach" && distance != null) advice = advise({ phase: "approach", distance, lie, flags, forceClub: alt, ghost: ghostScore }, PROFILE);
+    else if (phase === "short" && distance != null) advice = advise({ phase: "short", distance, ghost: ghostScore }, PROFILE);
+    else if (phase === "putt" && distance != null) advice = advise({ phase: "putt", distance, ghost: ghostScore }, PROFILE);
+  } catch (e) { advice = null; }
+
+  const grade = advice?.zoneGrade;
+  const gradeColor = grade ? ZONE_COLOR[grade] : C.sub;
+  const summary = advice && (
+    phase === "tee" && advice.leave != null
+      ? `leaves ~${advice.leave}${advice.plan === "layup" ? ` · ${advice.secondClub} to ~${advice.leave3}` : ""}${grade ? ` · ${grade.toUpperCase()} ZONE` : ""}${advice.target && advice.target !== "center" ? ` · aim ${advice.target}` : ""}`
+      : phase === "approach" || phase === "tee"
+        ? `${distance} · ${grade ? `${grade.toUpperCase()} ZONE` : "no zone"}${advice.target ? ` · ${advice.target}` : ""}`
+        : null
+  );
+  const alts = advice?.alternatives || [];
+  const selected = alt || advice?.club;
+
+  const flagChip = (k, label, on, fn) => <Chip key={k} on={on} onClick={() => { fn(k); setAlt(null); }} tone="green">{label}</Chip>;
+  const holeMeta = `Par ${par}${yards != null ? ` · ${yards} yds` : ""}${h.si ? ` · SI ${h.si}` : ""}`;
+
+  return (
+    <div style={{ minHeight: "100dvh", maxWidth: 480, margin: "0 auto", display: "flex", flexDirection: "column", gap: 12, padding: "calc(env(safe-area-inset-top) + 10px) 14px calc(env(safe-area-inset-bottom) + 14px)" }}>
+      {/* header — mirrors Play: exit at left, toggle in the middle, hole at right */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexShrink: 0, gap: 10 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
+          <button onClick={() => (filled === 0 ? onExit() : setConfirmExit(true))} aria-label="Exit round" style={{ width: 34, height: 34, borderRadius: 10, background: C.card2, color: C.sub, border: `1px solid ${C.line}`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><X size={18} /></button>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ color: C.ink, fontWeight: 800, fontSize: 15, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{course.name}</div>
+            <div style={{ color: C.sub, fontSize: 11, ...tnum }}>{holeMeta}</div>
+          </div>
+        </div>
+        <button onClick={onPlay} aria-label="Open ghost match" style={togglePill}><Ghost size={14} /> GHOST</button>
+        <div style={{ textAlign: "right", flexShrink: 0 }}>
+          <div style={{ ...lbl, fontSize: 10 }}>HOLE</div>
+          <div style={{ fontFamily: NUM, fontWeight: 800, fontSize: 18, color: C.ink, ...tnum }}>{hole + 1}<span style={{ color: C.sub, fontSize: 12 }}>/18</span></div>
+        </div>
+      </div>
+      {confirmExit && <LeaveSheet hole={hole} onStay={() => setConfirmExit(false)} onLeave={() => { setConfirmExit(false); onExit(); }} />}
+
+      {/* phase chips (manual in v18; GPS auto-phase arrives with the Hole View) */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 6 }}>
+        {PHASES.map(([k, label]) => <Chip key={k} on={phase === k} onClick={() => pickPhase(k)}>{label}</Chip>)}
+      </div>
+
+      {/* distance */}
+      <div style={{ position: "relative" }}>
+        <input type="number" inputMode="decimal" min="1" value={dist} onChange={(e) => { setDist(e.target.value); setAlt(null); }} placeholder={phase === "putt" ? "first putt" : "yards"} aria-label={`Distance in ${unit}`}
+          style={{ width: "100%", background: C.card, color: C.ink, border: `1px solid ${C.line}`, borderRadius: 16, fontFamily: NUM, fontSize: 46, fontWeight: 800, padding: "10px 64px 10px 18px", textAlign: "center", outline: "none", ...tnum }} />
+        <div style={{ position: "absolute", right: 18, top: "50%", transform: "translateY(-50%)", color: C.sub, fontSize: 12, fontWeight: 800, letterSpacing: 1 }}>{unit.toUpperCase()}</div>
+      </div>
+
+      {/* lie (approach only) */}
+      {phase === "approach" && (
+        <div style={{ display: "flex", gap: 6 }}>
+          {[["fairway", "fairway"], ["rough", "rough"]].map(([k, label]) => <Chip key={k} on={lie === k} onClick={() => { setLie(k); setAlt(null); }}>{label}</Chip>)}
+        </div>
+      )}
+
+      {/* flags — tight / water are per hole and remembered per course; wet / wind ride with the round */}
+      {(phase === "tee" || phase === "approach") && (
+        <div style={{ display: "flex", gap: 6, overflowX: "auto", paddingBottom: 2 }}>
+          {HOLE_FLAGS.map(([k, label]) => flagChip(k, label, !!holeFlags[k], toggleHoleFlag))}
+          <div style={{ width: 1, background: C.line, flexShrink: 0, margin: "4px 2px" }} />
+          {ROUND_FLAGS.map(([k, label]) => flagChip(k, label, !!roundFlags[k], toggleRoundFlag))}
+        </div>
+      )}
+
+      {/* the card */}
+      <div style={{ background: C.card, borderRadius: 18, padding: "16px 18px", border: `1px solid ${C.line}`, borderLeft: `4px solid ${gradeColor}` }}>
+        {!advice && <div style={{ color: C.sub, fontSize: 14, lineHeight: 1.4 }}>{phase === "putt" ? "Type the first-putt distance in feet." : "Type the distance in yards."}</div>}
+        {advice && (
+          <>
+            {advice.club && (
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 10 }}>
+                <div style={{ fontFamily: NUM, fontSize: 34, fontWeight: 800, letterSpacing: 0.5, lineHeight: 1.1 }}>{clubName(advice.club).toUpperCase()}</div>
+                {advice.swing && <div style={{ color: C.sub, fontSize: 12, fontWeight: 800, letterSpacing: 1 }}>{advice.swing}</div>}
+              </div>
+            )}
+            {summary && <div style={{ color: gradeColor, fontSize: 13, fontWeight: 800, letterSpacing: 0.3, marginTop: 6, ...tnum }}>{summary}</div>}
+            {advice.why.map((w, i) => <div key={i} style={{ color: C.ink, fontSize: 14, lineHeight: 1.45, marginTop: i === 0 ? 12 : 8 }}>{w}</div>)}
+            {advice.ghostLine && <div style={{ color: C.slate, fontSize: 12, marginTop: 14, ...tnum }}>{advice.ghostLine}</div>}
+          </>
+        )}
+      </div>
+
+      {/* alternatives — tap a club to see why it lost */}
+      {alts.length > 0 && (
+        <div style={{ display: "flex", gap: 6, overflowX: "auto", paddingBottom: 2 }}>
+          {alts.map(a => (
+            <Chip key={a.club} on={selected === a.club} dim={!!a.teeBanReason} onClick={() => setAlt(a.club === advice.club && !alt ? null : (a.club === alt ? null : a.club))}>
+              {a.club} {a.leave != null ? a.leave : a.median}
+            </Chip>
+          ))}
+        </div>
+      )}
+
+      {/* hole nav */}
+      <div style={{ marginTop: "auto", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+        <button onClick={() => setHole(x => Math.max(0, x - 1))} disabled={hole === 0} aria-label="Previous hole" style={{ width: 50, height: 50, borderRadius: 14, background: C.card2, color: hole === 0 ? C.line : C.ink, border: `1px solid ${C.line}`, display: "flex", alignItems: "center", justifyContent: "center" }}><ChevronLeft size={22} /></button>
+        <button onClick={onPlay} style={{ flex: 1, height: 50, borderRadius: 14, background: C.card, color: C.ink, border: `1px solid ${C.line}`, fontWeight: 800, fontSize: 14, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}><Ghost size={16} /> Score this hole</button>
+        <button onClick={() => setHole(x => Math.min(17, x + 1))} disabled={hole === 17} aria-label="Next hole" style={{ width: 50, height: 50, borderRadius: 14, background: C.card2, color: hole === 17 ? C.line : C.ink, border: `1px solid ${C.line}`, display: "flex", alignItems: "center", justifyContent: "center" }}><ChevronRight size={22} /></button>
+      </div>
     </div>
   );
 }
@@ -1297,7 +1460,8 @@ function History({ history, stats, cloud, onDelete, onImport, onBack }) {
 /* ---------- localStorage persistence ---------- */
 const LS_KEY = "bogeyman-matches:v1";
 const HIST_KEY = "bogeyman-matches:history:v1";
-const DEFAULT_STATE = { screen: "setup", course: null, diff: 7.9, scores: Array(18).fill(null), hole: 0, roundId: null };
+const DEFAULT_CADDIE = { wet: false, wind: false };   // round-level caddie flags (v18)
+const DEFAULT_STATE = { screen: "setup", course: null, diff: 7.9, scores: Array(18).fill(null), hole: 0, roundId: null, caddie: DEFAULT_CADDIE };
 function loadState() {
   try {
     const raw = localStorage.getItem(LS_KEY);
@@ -1308,9 +1472,9 @@ function loadState() {
     const scoresOk = Array.isArray(s.scores) && s.scores.length === 18;
     const scores = scoresOk ? s.scores.map(v => (typeof v === "number" && v > 0 ? v : null)) : Array(18).fill(null);
     const played = scores.filter(v => v != null).length;
-    // Resume ONLY a genuinely in-progress round: the play screen with at least one
-    // hole scored. An empty just-started round or a finished summary opens the menu.
-    const wantResume = s.screen === "play" && course && scoresOk && played >= 1;
+    // Resume ONLY a genuinely in-progress round: the play or caddie screen with at least
+    // one hole scored. An empty just-started round or a finished summary opens the menu.
+    const wantResume = (s.screen === "play" || s.screen === "caddie") && course && scoresOk && played >= 1;
     return {
       screen: wantResume ? s.screen : "setup",
       course,
@@ -1318,6 +1482,7 @@ function loadState() {
       scores,
       hole: Number.isInteger(s.hole) && s.hole >= 0 && s.hole < 18 ? s.hole : 0,
       roundId: typeof s.roundId === "string" ? s.roundId : null,
+      caddie: s.caddie && typeof s.caddie === "object" ? { wet: !!s.caddie.wet, wind: !!s.caddie.wind } : DEFAULT_CADDIE,
     };
   } catch (e) {
     return DEFAULT_STATE;
@@ -1358,15 +1523,17 @@ function App() {
   const [scores, setScores] = useState(initial.scores);
   const [hole, setHole] = useState(initial.hole);
   const [roundId, setRoundId] = useState(initial.roundId);
+  const [caddieFlags, setCaddieFlags] = useState(initial.caddie);
   const [history, setHistory] = useState(loadHistory());
   const [tombs, setTombs] = useState(loadTombs());
   const cloud = useCloudSync(history, setHistory, tombs, setTombs);
-  useEffect(() => { saveState({ screen, course, diff, scores, hole, roundId }); }, [screen, course, diff, scores, hole, roundId]);
+  useEffect(() => { saveState({ screen, course, diff, scores, hole, roundId, caddie: caddieFlags }); }, [screen, course, diff, scores, hole, roundId, caddieFlags]);
   useEffect(() => { saveHistory(history); }, [history]);
   useEffect(() => { saveTombs(tombs); }, [tombs]);
   const ghost = useMemo(() => course ? computeGhost(course, diff) : null, [course, diff]);
   const stats = useMemo(() => deriveStats(history), [history]);
-  const start = () => { if (!course) return; setScores(Array(18).fill(null)); setHole(0); setRoundId(null); setScreen("play"); };
+  // A round opens on the Caddie: you are on the tee wanting a club before you need a scorecard (Brett, Sep 19).
+  const start = () => { if (!course) return; setScores(Array(18).fill(null)); setHole(0); setRoundId(null); setCaddieFlags(DEFAULT_CADDIE); setScreen("caddie"); };
   // Exit an unfinished round without saving it: clear scores and return to the menu.
   const exitRound = () => { setScores(Array(18).fill(null)); setHole(0); setRoundId(null); setScreen("setup"); };
   // Finalize: persist the finished round, then a soft (editable) transition to summary.
@@ -1401,7 +1568,8 @@ function App() {
     <div style={{ minHeight: "100dvh", background: C.bg, color: C.ink, fontFamily: SANS }}>
       <style dangerouslySetInnerHTML={{ __html: RESET }} />
       {screen === "setup" && <Setup course={course} setCourse={setCourse} diff={diff} setDiff={setDiff} stats={stats} history={history} onStart={start} onHistory={() => setScreen("history")} />}
-      {screen === "play" && course && ghost && <Play course={course} ghost={ghost} scores={scores} setScores={setScores} hole={hole} setHole={setHole} onFinish={finalize} onExit={exitRound} />}
+      {screen === "play" && course && ghost && <Play course={course} ghost={ghost} scores={scores} setScores={setScores} hole={hole} setHole={setHole} onFinish={finalize} onExit={exitRound} onCaddie={() => setScreen("caddie")} />}
+      {screen === "caddie" && course && ghost && <Caddie key={hole} course={course} ghost={ghost} hole={hole} setHole={setHole} scores={scores} roundFlags={caddieFlags} setRoundFlags={setCaddieFlags} onPlay={() => setScreen("play")} onExit={exitRound} />}
       {screen === "summary" && course && ghost && <Summary course={course} ghost={ghost} scores={scores} history={history} onEditScore={editScore} onReset={reset} />}
       {screen === "history" && <History history={history} stats={stats} cloud={cloud} onDelete={deleteRound} onImport={importRounds} onBack={() => setScreen("setup")} />}
     </div>

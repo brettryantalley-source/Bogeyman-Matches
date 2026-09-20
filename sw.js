@@ -1,5 +1,5 @@
 /* Ghost Match — network-first service worker (latest when online, cached fallback offline) */
-const CACHE = 'bogeyman-matches-v17';
+const CACHE = 'bogeyman-matches-v18';
 const SHELL = [
   './',
   './index.html',

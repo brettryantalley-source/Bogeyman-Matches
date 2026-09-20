@@ -263,18 +263,20 @@ export function clubUp(club, n, profile) {
 }
 
 /**
- * Approach decision. input: { distance, lie: 'tee'|'fairway'|'rough', flags?, ghost? }
+ * Approach decision. input: { distance, lie: 'tee'|'fairway'|'rough', flags?, forceClub?, ghost? }
  * Distance is what he plays; wet changes the club and target, not the number.
  */
 export function approachAdvice(input, profile) {
   const f = normFlags(input.flags);
   const distance = input.distance;
   const stock = stockClub(distance, profile);
-  const shortMiss = (stock.shortPct ?? 0) >= 0.2;
-  let club = stock;
+  // A manual tap on an alternative chip shows that club's card instead of the pick.
+  const forced = input.forceClub ? profile.clubs.find((c) => c.approach && c.id === input.forceClub) : null;
+  const shortMiss = ((forced || stock).shortPct ?? 0) >= 0.2;
+  let club = forced || stock;
   let swing = shortMiss ? "easy" : "stock";
   let target = shortMiss ? "back-center" : "center";
-  if (f.wet) {
+  if (f.wet && !forced) {
     club = clubUp(stock, profile.wet.clubUp, profile);
     target = "carry the number";
   }
@@ -290,7 +292,11 @@ export function approachAdvice(input, profile) {
       `${label}: neutral. ${shortMiss && !f.wet ? "" : "Stock shot, center. "}${pct(z.gir)} GIR, ~${ft(z.proxFt)} ft.`;
     why.push(withSample(text, z));
   }
-  if (f.wet) {
+  if (forced && forced.id !== stock.id) {
+    const delta = forced.median - distance;
+    why.push(`${forced.name} median is ${forced.median} — ${Math.abs(delta)} ${delta >= 0 ? "past" : "short of"} ${distance}. Stock is ${stock.name} at ${stock.median}.`);
+  }
+  if (f.wet && !forced) {
     why.push(`Wet: no roll-out. ${club.name} is ${profile.wet.clubUp} clubs up from your stock ${stock.name} so ${distance} carries.`);
   }
   if ((club.shortPct ?? 0) >= 0.2) {
