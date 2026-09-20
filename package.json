@@ -5,7 +5,7 @@
   "type": "module",
   "description": "Ghost Match — build deps only. React ships as UMD; this is here for the Firebase SDK, which esbuild tree-shakes into index.html.",
   "scripts": {
-    "test": "node --test src/caddie.test.js"
+    "test": "node --test src/caddie.test.js src/geometry.test.js"
   },
   "dependencies": {
     "firebase": "^12.4.0"

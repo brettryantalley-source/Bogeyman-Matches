@@ -126,6 +126,25 @@ Four things that fall out of the real data:
 - **Overpass returns 406 without a User-Agent.** Browsers always send one, so `fetch` from
   the app is fine — but any node-side test script must set one.
 
+### 4.3 MapTiler — account and key exist (done Sep 20, 2026)
+Brett's MapTiler Cloud account (free plan) has one key, created for this app and verified:
+
+| | |
+|---|---|
+| Key name | `Ghost Match PWA` |
+| Key | `3frli95k3gG0NelkI7Kx` (client-side by design; origin-locked, see below) |
+| Allowed HTTP origins | `brettryantalley-source.github.io`, `localhost`, `127.0.0.1` |
+| Raster XYZ | `https://api.maptiler.com/tiles/satellite-v2/{z}/{x}/{y}.jpg?key=KEY` |
+| TileJSON | `https://api.maptiler.com/tiles/satellite-v2/tiles.json?key=KEY` |
+| Zoom | 0–22, jpg, tileset version 2.5 |
+| Attribution (required) | `© MapTiler © OpenStreetMap contributors` |
+
+Verified with curl: a tile request carrying `Origin: https://brettryantalley-source.github.io`
+returns 200 (image/jpeg, ~55 KB at z16); a foreign origin or no origin returns 403. So a
+node-side tile pre-fetch script must send that Origin header, and the in-app tile cache (§5)
+works unchanged because the PWA's own requests carry the Pages origin. WMTS and the OGC Tiles
+API are not on the free plan — use XYZ.
+
 ## 5. Decide before Session 4: the map must work with bad signal
 This app is deliberately offline-first — network-first service worker with cache fallback,
 Firestore queuing writes in dead zones, localStorage as the read path. That was built because

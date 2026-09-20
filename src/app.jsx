@@ -3,6 +3,7 @@ import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRe
 import { initializeFirestore, persistentLocalCache, persistentSingleTabManager, collection, doc, setDoc, getDocs } from "firebase/firestore";
 import { advise } from "./caddie.js";
 import PROFILE from "./profile.json";
+import { greenDistances, autoPhase, fetchGeometry, compactGeometry } from "./geometry.js";
 
 const React = window.React;
 const { useState, useMemo, useEffect } = React;
@@ -35,7 +36,7 @@ const MapPin = (p) => <Icon {...p}><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0
 const X = (p) => <Icon {...p}><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></Icon>;
 
 /* build tag — bump alongside the sw.js cache version so a deploy is confirmable on-screen */
-const BUILD = "v18 · Sep 19";
+const BUILD = "v18.5 · Sep 19";
 
 /* palette — Shot Pattern dark */
 const C = {
@@ -97,8 +98,12 @@ function teeOptions(fullCourse) {
 function buildCourse(fullCourse, teeOpt) {
   const t = teeOpt.tee;
   const name = fullCourse.club_name || fullCourse.course_name || "Course";
+  const loc = fullCourse.location || {};
   return {
     id: `${fullCourse.id}:${teeOpt.key}`,
+    apiId: fullCourse.id,
+    lat: typeof loc.latitude === "number" ? loc.latitude : undefined,
+    lon: typeof loc.longitude === "number" ? loc.longitude : undefined,
     name,
     tee: t.tee_name || teeOpt.gender,
     rating: t.course_rating,
@@ -364,7 +369,7 @@ const stepBtn = { width: 54, height: 54, borderRadius: 15, background: C.card2, 
 const lbl = { color: C.sub, fontSize: 11, fontWeight: 800, letterSpacing: 1 };
 
 /* ---------- setup (one screen: search course · pick tee · differential · start) ---------- */
-function Setup({ course, setCourse, diff, setDiff, stats, history, onStart, onHistory }) {
+function Setup({ course, setCourse, diff, setDiff, stats, history, onStart, onHistory, geometry }) {
   /* --- course search (golfcourseapi, debounced) --- */
   const [query, setQuery] = useState("");
   const [results, setResults] = useState([]);              // raw API results (up to 40)
@@ -587,6 +592,9 @@ function Setup({ course, setCourse, diff, setDiff, stats, history, onStart, onHi
             <div style={{ minWidth: 0 }}>
               <div style={{ color: C.ink, fontWeight: 700, fontSize: 14, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{course.name}<span style={{ color: C.sub, fontWeight: 600 }}> · {course.tee}</span></div>
               <div style={{ color: C.sub, fontSize: 11, marginTop: 3, ...tnum }}>Ghost plays to {g.hcp} · par {course.par} · {course.rating}/{course.slope}</div>
+              {geometry && geoStatusText(geometry.geo, geometry.status) && (
+                <button onClick={geometry.status === "error" ? geometry.retry : undefined} style={{ color: geometry.status === "ok" ? C.green : C.sub, fontSize: 11, marginTop: 3, textAlign: "left", ...tnum }}>{geoStatusText(geometry.geo, geometry.status)}</button>
+              )}
             </div>
             <GhostRing value={g.gross} size={58} />
           </div>
@@ -811,9 +819,83 @@ function LeaveSheet({ hole, onStay, onLeave }) {
   );
 }
 
-/* ---------- Caddie (v18) — club, aim and why, every note citing a number from src/profile.json ----------
+/* ---------- hole geometry (v18.5) — OpenStreetMap via Overpass, cached per course; greens you mark by standing on them as the fallback ---------- */
+const GEO_KEY = (apiId) => `bogeyman-matches:geo:v1:${apiId}`;
+const MARK_KEY = "bogeyman-matches:greens:v1";
+const apiIdOf = (course) => course?.apiId ?? (course?.id != null ? String(course.id).split(":")[0] : null);
+/* Anchor coords: on the built course since v18.5; older in-progress rounds fall back to the cached full course. */
+function courseAnchor(course) {
+  if (!course) return null;
+  if (typeof course.lat === "number" && typeof course.lon === "number") return { lat: course.lat, lon: course.lon };
+  try {
+    const full = JSON.parse(localStorage.getItem(courseCacheKey(apiIdOf(course))) || "null");
+    const loc = full && full.location;
+    if (loc && typeof loc.latitude === "number" && typeof loc.longitude === "number") return { lat: loc.latitude, lon: loc.longitude };
+  } catch (e) { /* ignore */ }
+  return null;
+}
+function loadGeo(apiId) {
+  try { const g = JSON.parse(localStorage.getItem(GEO_KEY(apiId)) || "null"); return g && g.holes ? g : null; } catch (e) { return null; }
+}
+function saveGeo(apiId, geo) {
+  try { localStorage.setItem(GEO_KEY(apiId), JSON.stringify(geo)); } catch (e) { /* quota */ }
+}
+function loadMarks(course) {
+  try { const all = JSON.parse(localStorage.getItem(MARK_KEY) || "{}"); const c = all[courseKey(course)]; return c && typeof c === "object" ? c : {}; } catch (e) { return {}; }
+}
+function saveMarks(course, marks) {
+  try { const all = JSON.parse(localStorage.getItem(MARK_KEY) || "{}"); all[courseKey(course)] = marks; localStorage.setItem(MARK_KEY, JSON.stringify(all)); } catch (e) { /* quota */ }
+}
+/* Fetch once per course when it is selected (needs signal then, not on the course); cache-first afterwards. */
+function useGeometry(course) {
+  const apiId = apiIdOf(course);
+  const anchor = courseAnchor(course);
+  const [geo, setGeo] = useState(() => (apiId ? loadGeo(apiId) : null));
+  const [status, setStatus] = useState(geo ? "ok" : "none");   // none | nocoords | loading | ok | error
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    if (!apiId) { setGeo(null); setStatus("none"); return; }
+    const cached = loadGeo(apiId);
+    if (cached) { setGeo(cached); setStatus("ok"); return; }
+    if (!anchor) { setGeo(null); setStatus("nocoords"); return; }
+    let live = true;
+    setStatus("loading");
+    fetchGeometry(anchor.lat, anchor.lon)
+      .then(g => { if (!live) return; const c = { ...compactGeometry(g), fetchedAt: Date.now() }; saveGeo(apiId, c); setGeo(c); setStatus("ok"); })
+      .catch(() => { if (live) { setGeo(null); setStatus("error"); } });
+    return () => { live = false; };
+  }, [apiId, anchor && anchor.lat, anchor && anchor.lon, tick]);
+  return { geo, status, retry: () => setTick(t => t + 1) };
+}
+/* Live position. High accuracy, 2 s max age (spec §4.2). `retry` re-subscribes after a denial. */
+function useGeo(active) {
+  const [fix, setFix] = useState(null);      // { lat, lon, acc, ts }
+  const [err, setErr] = useState(null);      // null | no-geo | denied | unavailable
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    if (!active) return;
+    if (!navigator.geolocation) { setErr("no-geo"); return; }
+    setErr(null);
+    const id = navigator.geolocation.watchPosition(
+      p => setFix({ lat: p.coords.latitude, lon: p.coords.longitude, acc: p.coords.accuracy, ts: p.timestamp }),
+      e => setErr(e && e.code === 1 ? "denied" : "unavailable"),
+      { enableHighAccuracy: true, maximumAge: 2000, timeout: 20000 });
+    return () => navigator.geolocation.clearWatch(id);
+  }, [active, tick]);
+  return { fix, err, retry: () => setTick(t => t + 1) };
+}
+const geoStatusText = (geo, status) => {
+  if (status === "ok" && geo) { const n = Object.values(geo.holes).filter(h => h.green).length; return `Hole map · ${n}/18 greens from OpenStreetMap`; }
+  if (status === "loading") return "Fetching hole map…";
+  if (status === "nocoords") return "No hole map — this course has no coordinates";
+  if (status === "error") return "Hole map failed — tap to retry";
+  return null;
+};
+
+/* ---------- Caddie (v18 → v18.5) — club, aim and why, every note citing a number from src/profile.json ----------
    Its own screen, toggled from Play. The engine is src/caddie.js; nothing here touches the ghost
-   beyond passing the hole's ghost score through as a status line (the engine never reads it). */
+   beyond passing the hole's ghost score through as a status line (the engine never reads it).
+   v18.5: GPS + hole geometry pick the phase and fill the distance; the chips are the fallback. */
 const CADDIE_FLAGS_KEY = "bogeyman-matches:caddie-flags:v1";   // per-course, per-hole tight / water flags
 const courseKey = (course) => `${course.id ?? course.name}|${course.tee ?? ""}`;
 function loadHoleFlags(course) {
@@ -824,32 +906,52 @@ function saveHoleFlags(course, flags) {
 }
 const ZONE_COLOR = { green: C.green, amber: "#D4A94A", red: "#C9645E" };
 const PHASES = [["tee", "TEE"], ["approach", "APPROACH"], ["short", "SHORT"], ["putt", "PUTT"]];
+const PHASE_ORDER = PHASES.map(p => p[0]);
 const HOLE_FLAGS = [["tight", "tight"], ["waterL", "water L"], ["waterR", "water R"]];
 const ROUND_FLAGS = [["wet", "wet"], ["wind", "wind"]];
 const clubName = (id) => (PROFILE.clubs.find(c => c.id === id) || { name: id }).name;
 
-function Chip({ on, onClick, children, tone = "ink", dim }) {
-  const bg = on ? (tone === "green" ? C.green : C.ink) : C.card2;
+function Chip({ on, onClick, children, tone = "ink", dim, small }) {
+  const bg = on ? (tone === "green" ? C.green : tone === "slate" ? C.slate : C.ink) : C.card2;
   return (
-    <button onClick={onClick} style={{ height: 32, padding: "0 12px", borderRadius: 10, background: bg, color: on ? "#07140C" : (dim ? "#55595F" : C.sub), border: `1px solid ${on ? "transparent" : C.line}`, fontSize: 12, fontWeight: 800, letterSpacing: 0.5, whiteSpace: "nowrap", flexShrink: 0, textDecoration: dim ? "line-through" : "none", ...tnum }}>{children}</button>
+    <button onClick={onClick} style={{ height: small ? 26 : 32, padding: small ? "0 9px" : "0 12px", borderRadius: 10, background: bg, color: on ? "#07140C" : (dim ? "#55595F" : C.sub), border: `1px solid ${on ? "transparent" : C.line}`, fontSize: small ? 11 : 12, fontWeight: 800, letterSpacing: 0.5, whiteSpace: "nowrap", flexShrink: 0, textDecoration: dim ? "line-through" : "none", ...tnum }}>{children}</button>
   );
 }
 
-function Caddie({ course, ghost, hole, setHole, scores, roundFlags, setRoundFlags, onPlay, onExit }) {
+function Caddie({ course, ghost, hole, setHole, scores, roundFlags, setRoundFlags, geo, geoStatus, onRetryGeo, onPlay, onExit }) {
   const h = course.holes[hole];
   const par = h.par, yards = typeof h.yards === "number" ? h.yards : null;
-  const [phase, setPhase] = useState("tee");
-  const [dist, setDist] = useState(yards != null ? String(yards) : "");
+  const [manualPhase, setManualPhase] = useState(null);    // null = follow GPS
+  const [distOverride, setDistOverride] = useState(null);  // null = follow GPS
   const [lie, setLie] = useState("fairway");
-  const [alt, setAlt] = useState(null);             // manually tapped alternative club
+  const [alt, setAlt] = useState(null);                    // manually tapped alternative club
   const [holeFlagsAll, setHoleFlagsAll] = useState(() => loadHoleFlags(course));
+  const [marks, setMarks] = useState(() => loadMarks(course));
   const [confirmExit, setConfirmExit] = useState(false);
+  const { fix, err: gpsErr, retry: retryGps } = useGeo(true);
+
+  /* the green for this hole: a green you marked wins, else OpenStreetMap */
+  const osmHole = geo && geo.holes ? geo.holes[hole + 1] : null;
+  const mark = marks[hole];
+  const green = mark ? { center: mark, ring: null } : (osmHole && osmHole.green) || null;
+  const live = fix && green ? greenDistances(fix, green) : null;
+  const auto = live ? autoPhase(live.middle, yards, live.inside) : null;
+  const phase = manualPhase || auto || "tee";
+  // a new auto phase (you walked into the next band) drops any typed distance and alt club
+  useEffect(() => { setDistOverride(null); setAlt(null); }, [auto]);
+
   const holeFlags = holeFlagsAll[hole] || {};
   const toggleHoleFlag = (k) => { const next = { ...holeFlagsAll, [hole]: { ...holeFlags, [k]: !holeFlags[k] } }; setHoleFlagsAll(next); saveHoleFlags(course, next); };
   const toggleRoundFlag = (k) => setRoundFlags(f => ({ ...f, [k]: !f[k] }));
-  const pickPhase = (p) => { setPhase(p); setAlt(null); setDist(p === "tee" && yards != null ? String(yards) : ""); };
+  const pickPhase = (p) => { setManualPhase(p === auto ? null : p); setAlt(null); setDistOverride(null); };
+  const cyclePhase = () => pickPhase(PHASE_ORDER[(PHASE_ORDER.indexOf(phase) + 1) % PHASE_ORDER.length]);
+  const markGreen = () => { if (!fix) return; const next = { ...marks, [hole]: { lat: fix.lat, lon: fix.lon } }; setMarks(next); saveMarks(course, next); };
+  const clearMark = () => { const next = { ...marks }; delete next[hole]; setMarks(next); saveMarks(course, next); };
   const filled = scores.filter(s => s != null).length;
 
+  /* distance: typed wins, else GPS to the middle, else the scorecard yardage on the tee. Putts are typed (GPS can't read feet). */
+  const gpsDist = live && phase !== "putt" ? String(Math.round(live.middle)) : null;
+  const dist = distOverride != null ? distOverride : (gpsDist != null ? gpsDist : (phase === "tee" && yards != null ? String(yards) : ""));
   const flags = { ...holeFlags, ...roundFlags };
   const n = parseFloat(dist);
   const distance = Number.isFinite(n) && n > 0 ? n : null;
@@ -857,13 +959,14 @@ function Caddie({ course, ghost, hole, setHole, scores, roundFlags, setRoundFlag
   const ghostScore = ghost.holes[hole];
   let advice = null;
   try {
-    if (phase === "tee" && distance != null) advice = advise({ phase: "tee", par, yards: distance, flags, forceClub: alt, ghost: ghostScore }, PROFILE);
-    else if (phase === "approach" && distance != null) advice = advise({ phase: "approach", distance, lie, flags, forceClub: alt, ghost: ghostScore }, PROFILE);
-    else if (phase === "short" && distance != null) advice = advise({ phase: "short", distance, ghost: ghostScore }, PROFILE);
-    else if (phase === "putt" && distance != null) advice = advise({ phase: "putt", distance, ghost: ghostScore }, PROFILE);
+    if (distance == null) advice = null;
+    else if (phase === "tee") advice = advise({ phase: "tee", par, yards: distance, flags, forceClub: alt, ghost: ghostScore }, PROFILE);
+    else if (phase === "approach") advice = advise({ phase: "approach", distance, lie, flags, forceClub: alt, ghost: ghostScore }, PROFILE);
+    else if (phase === "short") advice = advise({ phase: "short", distance, ghost: ghostScore }, PROFILE);
+    else advice = advise({ phase: "putt", distance, ghost: ghostScore }, PROFILE);
   } catch (e) { advice = null; }
 
-  const grade = advice?.zoneGrade;
+  const grade = advice && advice.zoneGrade;
   const gradeColor = grade ? ZONE_COLOR[grade] : C.sub;
   const summary = advice && (
     phase === "tee" && advice.leave != null
@@ -872,11 +975,14 @@ function Caddie({ course, ghost, hole, setHole, scores, roundFlags, setRoundFlag
         ? `${distance} · ${grade ? `${grade.toUpperCase()} ZONE` : "no zone"}${advice.target ? ` · ${advice.target}` : ""}`
         : null
   );
-  const alts = advice?.alternatives || [];
-  const selected = alt || advice?.club;
+  const alts = (advice && advice.alternatives) || [];
+  const selected = alt || (advice && advice.club);
 
   const flagChip = (k, label, on, fn) => <Chip key={k} on={on} onClick={() => { fn(k); setAlt(null); }} tone="green">{label}</Chip>;
   const holeMeta = `Par ${par}${yards != null ? ` · ${yards} yds` : ""}${h.si ? ` · SI ${h.si}` : ""}`;
+  const gpsLabel = fix ? `GPS ±${Math.round(fix.acc)} m` : gpsErr === "denied" ? "Location off — tap to allow" : gpsErr === "no-geo" ? "No GPS on this device" : gpsErr ? "GPS lost — tap to retry" : "Finding GPS…";
+  const greenSource = mark ? "green you marked" : (osmHole && osmHole.green ? (live && live.hasRing ? "OSM green" : "OSM green") : null);
+  const mapLine = geoStatusText(geo, geoStatus);
 
   return (
     <div style={{ minHeight: "100dvh", maxWidth: 480, margin: "0 auto", display: "flex", flexDirection: "column", gap: 12, padding: "calc(env(safe-area-inset-top) + 10px) 14px calc(env(safe-area-inset-bottom) + 14px)" }}>
@@ -897,16 +1003,38 @@ function Caddie({ course, ghost, hole, setHole, scores, roundFlags, setRoundFlag
       </div>
       {confirmExit && <LeaveSheet hole={hole} onStay={() => setConfirmExit(false)} onLeave={() => { setConfirmExit(false); onExit(); }} />}
 
-      {/* phase chips (manual in v18; GPS auto-phase arrives with the Hole View) */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 6 }}>
-        {PHASES.map(([k, label]) => <Chip key={k} on={phase === k} onClick={() => pickPhase(k)}>{label}</Chip>)}
+      {/* where you are — GPS picks the phase; tap the line to override, AUTO to hand it back */}
+      {auto ? (
+        <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+          <button onClick={cyclePhase} aria-label="Shot phase, tap to change" style={{ flex: 1, minWidth: 0, height: 44, borderRadius: 12, background: manualPhase ? C.card2 : C.ink, color: manualPhase ? C.ink : "#07140C", border: `1px solid ${manualPhase ? C.line : "transparent"}`, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 14px", gap: 8 }}>
+            <span style={{ fontSize: 13, fontWeight: 800, letterSpacing: 1 }}>{phase.toUpperCase()}</span>
+            <span style={{ fontSize: 12, fontWeight: 700, opacity: 0.85, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", ...tnum }}>
+              {live.inside ? "on the green" : `${Math.round(live.middle)} to middle · F ${Math.round(live.front)} · B ${Math.round(live.back)}`}
+            </span>
+          </button>
+          {manualPhase && <Chip on tone="slate" onClick={() => pickPhase(auto)}>AUTO</Chip>}
+        </div>
+      ) : (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 6 }}>
+          {PHASES.map(([k, label]) => <Chip key={k} on={phase === k} onClick={() => pickPhase(k)}>{label}</Chip>)}
+        </div>
+      )}
+      <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+        <Chip small on={!!fix} tone="slate" onClick={retryGps}>{gpsLabel}</Chip>
+        {green
+          ? <Chip small on={false} onClick={mark ? clearMark : undefined}>{greenSource}{mark ? " · clear" : ""}</Chip>
+          : <Chip small on={!!fix} tone="green" onClick={markGreen}>{fix ? "Stand on the green · tap to mark it" : "No green for this hole"}</Chip>}
+        {!green && mapLine && <button onClick={onRetryGeo} style={{ color: C.sub, fontSize: 11, padding: "0 4px" }}>{mapLine}</button>}
       </div>
 
-      {/* distance */}
+      {/* distance — GPS fills it, typing overrides it (a laser beats GPS) */}
       <div style={{ position: "relative" }}>
-        <input type="number" inputMode="decimal" min="1" value={dist} onChange={(e) => { setDist(e.target.value); setAlt(null); }} placeholder={phase === "putt" ? "first putt" : "yards"} aria-label={`Distance in ${unit}`}
-          style={{ width: "100%", background: C.card, color: C.ink, border: `1px solid ${C.line}`, borderRadius: 16, fontFamily: NUM, fontSize: 46, fontWeight: 800, padding: "10px 64px 10px 18px", textAlign: "center", outline: "none", ...tnum }} />
-        <div style={{ position: "absolute", right: 18, top: "50%", transform: "translateY(-50%)", color: C.sub, fontSize: 12, fontWeight: 800, letterSpacing: 1 }}>{unit.toUpperCase()}</div>
+        <input type="number" inputMode="decimal" min="1" value={dist} onChange={(e) => { setDistOverride(e.target.value); setAlt(null); }} placeholder={phase === "putt" ? (live ? `GPS ~${Math.round(live.middle * 3)} ft — type it` : "first putt, feet") : "yards"} aria-label={`Distance in ${unit}`}
+          style={{ width: "100%", background: C.card, color: distOverride != null ? C.ink : (gpsDist != null ? C.green : C.ink), border: `1px solid ${C.line}`, borderRadius: 16, fontFamily: NUM, fontSize: 46, fontWeight: 800, padding: "10px 64px 10px 18px", textAlign: "center", outline: "none", ...tnum }} />
+        <div style={{ position: "absolute", right: 18, top: "50%", transform: "translateY(-50%)", color: C.sub, fontSize: 12, fontWeight: 800, letterSpacing: 1, textAlign: "right" }}>
+          {unit.toUpperCase()}
+          {distOverride != null && gpsDist != null && <div onClick={() => setDistOverride(null)} style={{ fontSize: 9, color: C.green, marginTop: 2 }}>GPS {gpsDist}</div>}
+        </div>
       </div>
 
       {/* lie (approach only) */}
@@ -1527,6 +1655,7 @@ function App() {
   const [history, setHistory] = useState(loadHistory());
   const [tombs, setTombs] = useState(loadTombs());
   const cloud = useCloudSync(history, setHistory, tombs, setTombs);
+  const geometry = useGeometry(course);   // v18.5: hole map, fetched when a course is picked, cached per course
   useEffect(() => { saveState({ screen, course, diff, scores, hole, roundId, caddie: caddieFlags }); }, [screen, course, diff, scores, hole, roundId, caddieFlags]);
   useEffect(() => { saveHistory(history); }, [history]);
   useEffect(() => { saveTombs(tombs); }, [tombs]);
@@ -1567,9 +1696,9 @@ function App() {
   return (
     <div style={{ minHeight: "100dvh", background: C.bg, color: C.ink, fontFamily: SANS }}>
       <style dangerouslySetInnerHTML={{ __html: RESET }} />
-      {screen === "setup" && <Setup course={course} setCourse={setCourse} diff={diff} setDiff={setDiff} stats={stats} history={history} onStart={start} onHistory={() => setScreen("history")} />}
+      {screen === "setup" && <Setup course={course} setCourse={setCourse} diff={diff} setDiff={setDiff} stats={stats} history={history} onStart={start} onHistory={() => setScreen("history")} geometry={geometry} />}
       {screen === "play" && course && ghost && <Play course={course} ghost={ghost} scores={scores} setScores={setScores} hole={hole} setHole={setHole} onFinish={finalize} onExit={exitRound} onCaddie={() => setScreen("caddie")} />}
-      {screen === "caddie" && course && ghost && <Caddie key={hole} course={course} ghost={ghost} hole={hole} setHole={setHole} scores={scores} roundFlags={caddieFlags} setRoundFlags={setCaddieFlags} onPlay={() => setScreen("play")} onExit={exitRound} />}
+      {screen === "caddie" && course && ghost && <Caddie key={hole} course={course} ghost={ghost} hole={hole} setHole={setHole} scores={scores} roundFlags={caddieFlags} setRoundFlags={setCaddieFlags} geo={geometry.geo} geoStatus={geometry.status} onRetryGeo={geometry.retry} onPlay={() => setScreen("play")} onExit={exitRound} />}
       {screen === "summary" && course && ghost && <Summary course={course} ghost={ghost} scores={scores} history={history} onEditScore={editScore} onReset={reset} />}
       {screen === "history" && <History history={history} stats={stats} cloud={cloud} onDelete={deleteRound} onImport={importRounds} onBack={() => setScreen("setup")} />}
     </div>
