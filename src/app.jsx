@@ -29,7 +29,7 @@ const MapPin = (p) => <Icon {...p}><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0
 const X = (p) => <Icon {...p}><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></Icon>;
 
 /* build tag — bump alongside the sw.js cache version so a deploy is confirmable on-screen */
-const BUILD = "v14 · Sep 19";
+const BUILD = "v15 · Sep 19";
 
 /* palette — Shot Pattern dark */
 const C = {
@@ -962,14 +962,79 @@ function Summary({ course, ghost, scores, history, onEditScore, onReset }) {
   );
 }
 
+/* ---------- backup: export / import rounds as JSON ----------
+   History lives only in localStorage, and since v14 the differential is derived from it,
+   so a cache wipe would reset the ghost's calibration too. Until durable cloud stats
+   land, this turns total loss into "lost since my last export". Seeds aren't included —
+   they ship in the bundle and survive a wipe on their own. */
+const BACKUP_TAG = "ghost-match";
+function backupPayload(history) {
+  return JSON.stringify({ app: BACKUP_TAG, schema: 1, exportedAt: nowISO(), rounds: history }, null, 2);
+}
+const backupName = () => `ghost-match-rounds-${new Date().toISOString().slice(0, 10)}.json`;
+/* On an installed iPhone PWA the share sheet ("Save to Files") is the reliable way out;
+   <a download> is the desktop/browser fallback. */
+async function exportRounds(history) {
+  const text = backupPayload(history), name = backupName();
+  try {
+    const file = new File([text], name, { type: "application/json" });
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      await navigator.share({ files: [file], title: "Ghost Match rounds" });
+      return "Saved";
+    }
+  } catch (e) {
+    if (e && e.name === "AbortError") return null;   // user dismissed the share sheet
+  }
+  try {
+    const url = URL.createObjectURL(new Blob([text], { type: "application/json" }));
+    const a = document.createElement("a");
+    a.href = url; a.download = name; document.body.appendChild(a); a.click();
+    document.body.removeChild(a); setTimeout(() => URL.revokeObjectURL(url), 1000);
+    return "Downloaded";
+  } catch (e) { return "Export failed"; }
+}
+/* Accepts a wrapped backup or a bare array; keeps only records the app can actually read
+   (same shape loadHistory enforces). Returns null when the file isn't a backup at all. */
+function parseBackup(text) {
+  let data;
+  try { data = JSON.parse(text); } catch (e) { return null; }
+  const rounds = Array.isArray(data) ? data : (data && Array.isArray(data.rounds) ? data.rounds : null);
+  if (!rounds) return null;
+  return rounds.filter(r => r && typeof r === "object" && typeof r.id === "string" &&
+    Array.isArray(r.holeScores) && Array.isArray(r.ghostHoleScores));
+}
+
 /* ---------- history + delete ---------- */
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const fmtDate = (iso) => { const d = new Date(iso); return isNaN(d) ? "" : `${MONTHS[d.getMonth()]} ${d.getDate()}`; };
 const resColor = (r) => r === "W" ? C.green : r === "L" ? C.red : C.slate;
 
-function History({ history, stats, onDelete, onBack }) {
+function History({ history, stats, onDelete, onImport, onBack }) {
   const [confirmId, setConfirmId] = useState(null);
+  const [msg, setMsg] = useState("");
+  const fileRef = React.useRef(null);
   const rounds = [...history].reverse(); // most recent first
+  const doExport = async () => {
+    if (!history.length) { setMsg("Nothing to export yet."); return; }
+    const r = await exportRounds(history);
+    if (r) setMsg(`${r} ${history.length} round${history.length === 1 ? "" : "s"}.`);
+  };
+  const doImport = (e) => {
+    const f = e.target.files && e.target.files[0];
+    e.target.value = "";                       // let the same file be picked again
+    if (!f) return;
+    const fr = new FileReader();
+    fr.onload = () => {
+      const rounds = parseBackup(String(fr.result));
+      if (!rounds) { setMsg("That doesn't look like a Ghost Match backup."); return; }
+      if (!rounds.length) { setMsg("No usable rounds in that file."); return; }
+      const { added, skipped } = onImport(rounds);
+      setMsg(added ? `Added ${added} round${added === 1 ? "" : "s"}${skipped ? `, ${skipped} already here` : ""}.`
+                   : "Already up to date — nothing new to add.");
+    };
+    fr.onerror = () => setMsg("Couldn't read that file.");
+    fr.readAsText(f);
+  };
   return (
     <div style={{ maxWidth: 460, margin: "0 auto", padding: "calc(env(safe-area-inset-top) + 14px) 18px 40px" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
@@ -1004,6 +1069,19 @@ function History({ history, stats, onDelete, onBack }) {
           </div>
         );
       })}
+
+      {/* backup — rounds live only on this phone until cloud stats land */}
+      <div style={{ marginTop: 22, paddingTop: 18, borderTop: `1px solid ${C.line}` }}>
+        <div style={{ ...lbl, marginBottom: 8 }}>BACKUP</div>
+        <div style={{ display: "flex", gap: 10 }}>
+          <button onClick={doExport} style={{ flex: 1, height: 46, borderRadius: 13, background: C.card, color: C.ink, border: `1px solid ${C.line}`, fontWeight: 800, fontSize: 14 }}>Export rounds</button>
+          <button onClick={() => fileRef.current && fileRef.current.click()} style={{ flex: 1, height: 46, borderRadius: 13, background: C.card, color: C.ink, border: `1px solid ${C.line}`, fontWeight: 800, fontSize: 14 }}>Import</button>
+        </div>
+        <input ref={fileRef} type="file" accept="application/json,.json" onChange={doImport} style={{ display: "none" }} />
+        <div style={{ color: msg ? C.ink : C.sub, fontSize: 11, marginTop: 8, lineHeight: 1.45 }}>
+          {msg || "Your rounds live on this phone only. Export saves them to Files/iCloud; import merges a backup back in without touching rounds you already have."}
+        </div>
+      </div>
     </div>
   );
 }
@@ -1085,13 +1163,21 @@ function App() {
   const reset = () => { setRoundId(null); setScreen("setup"); };
   // Delete a stored round so test rounds never pollute the record.
   const deleteRound = (id) => { setHistory(h => h.filter(r => r.id !== id)); if (id === roundId) setRoundId(null); };
+  // Restore a backup: merge by id so an old export can never delete newer rounds, and
+  // keep history in date order (deriveStats reads the streak off the end).
+  const importRounds = (incoming) => {
+    const seen = new Set(history.map(r => r.id));
+    const add = incoming.filter(r => !seen.has(r.id));
+    if (add.length) setHistory(h => [...h, ...add].sort((a, b) => new Date(a.date) - new Date(b.date)));
+    return { added: add.length, skipped: incoming.length - add.length };
+  };
   return (
     <div style={{ minHeight: "100dvh", background: C.bg, color: C.ink, fontFamily: SANS }}>
       <style dangerouslySetInnerHTML={{ __html: RESET }} />
       {screen === "setup" && <Setup course={course} setCourse={setCourse} diff={diff} setDiff={setDiff} stats={stats} history={history} onStart={start} onHistory={() => setScreen("history")} />}
       {screen === "play" && course && ghost && <Play course={course} ghost={ghost} scores={scores} setScores={setScores} hole={hole} setHole={setHole} onFinish={finalize} onExit={exitRound} />}
       {screen === "summary" && course && ghost && <Summary course={course} ghost={ghost} scores={scores} history={history} onEditScore={editScore} onReset={reset} />}
-      {screen === "history" && <History history={history} stats={stats} onDelete={deleteRound} onBack={() => setScreen("setup")} />}
+      {screen === "history" && <History history={history} stats={stats} onDelete={deleteRound} onImport={importRounds} onBack={() => setScreen("setup")} />}
     </div>
   );
 }
