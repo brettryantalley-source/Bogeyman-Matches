@@ -1,133 +1,144 @@
 # Design brief: Ghost Match redesign
 
-For a **Claude Design** thread. Output is a visual direction that a Code thread will rebuild in the
-repo; nothing here is implemented directly. The engineering handoff is `docs/HANDOFF-redesign.md`.
+For a **Claude Design** thread. This describes what the app does, what each screen must contain,
+and the conditions it is used in. It does **not** describe how the app currently looks, on purpose:
+the redesign starts from zero on colour, type, shape and layout. Screenshots of the current build are
+attached separately as evidence of the content, not as a reference to follow.
+
+Output is a visual direction; a Code thread rebuilds it in the repo afterwards. The engineering
+handoff is `docs/HANDOFF-redesign.md`.
 
 ---
 
-## 1. The product in three sentences
-Ghost Match is a golf PWA one person uses, on an iPhone, on the course. Brett plays a match against
-a "ghost" — his own recent form projected onto the course — and, since v18, has a caddie that tells
-him which club, where to aim, and why, with the "why" always citing one of his own numbers. It runs
-alongside Shot Pattern (his shot tracker) and borrows that app's dark look.
+## 1. What it is
+A golf app one person uses on an iPhone, on the course. Two jobs:
+1. **A match against a ghost.** The ghost is the golfer's own recent form projected onto the course
+   being played. It has a fixed score on every hole. The golfer logs a score per hole and the app
+   scores the match: six 3-hole segments, front nine, back nine, total.
+2. **A caddie.** Before every shot it says which club, where to aim, and why. The "why" is always one
+   or two short lines that cite the golfer's own statistics.
 
 ## 2. Who, where, how
-- **One user.** Brett, mid-handicap (last-5 differential ≈ 8), plays for par on every hole.
-- **Outdoors, in sunlight,** phone in one hand, glove on the other, often no signal. Glanceable
-  beats complete. Big numbers, few words, high contrast on a black ground.
-- **Cadence:** look at the Caddie before every shot (~70 times a round), tap a score on Play after
-  every hole (18 times), touch Setup once per round, Summary and History rarely.
-- Tone of voice: casual, competitive, second person, present tense, no exclamation points,
-  numbers not adjectives. "130–150 is your best number: 73% GIR, ~26 ft." not "Great zone!"
+- **One user.** Mid-handicap, plays for par on every hole.
+- **Outdoors, in sunlight, one-handed,** a glove on the other hand, frequently no signal.
+  Glanceable beats complete.
+- **Frequency:** the caddie screen ~70 times a round (every shot), the match screen 18 times (once
+  per hole), setup once per round, the summary once, the history rarely.
+- **Voice of the caddie:** second person, present tense, no exclamation points, numbers not
+  adjectives. Example: "130–150 is your best number: 73% GIR, ~26 ft."
 
-## 3. What exists today (design tokens and idiom)
+## 3. Structure
+Five screens. A round opens on the Caddie. Caddie and Match are one action apart in both
+directions and share the current hole, so switching on hole 7 lands on hole 7.
+
 ```
-Ground      #000000        cards #161719 / #212327      hairline #2A2D31
-Ink         #FFFFFF        secondary #8A8F98
-Brand green #57C77F  (icon, YOU, ghost ring, best zone, GPS-filled numbers)
-Ghost slate #9AA7B4  (everything the ghost owns, incl. the "Ghost: 5" status line)
-Red         #FF5B52  (losses, water)   amber #D4A94A (bunkers, neutral zone)   worst zone #C9645E
-Type        system (SF Pro Display for numerals, SF Pro Text otherwise), tabular numerals,
-            800-weight labels at 11px with 1px tracking, hero numerals 34–46px
-Shapes      16–18px radius cards, 10px radius chips, 1px hairlines, no shadows
-Icons       thin-stroke lucide (X, chevrons, flag, ghost mark)
+Setup ──start──▶ Caddie ◀──toggle──▶ Match ──finalize──▶ Summary ──new round──▶ Setup
+   └──▶ History (from Setup)
 ```
-Keep the black ground and the brand green. Everything else is negotiable.
 
-## 4. Screens to design, in priority order
+## 4. Screens: required content and states
 
-### A. Caddie (the one that matters)
-Content on screen, top to bottom today: header (exit · course · GHOST toggle · HOLE 1/18) →
-satellite map, hole-up, ~36% of the height → a phase line (`APPROACH · 140 to middle · F 125 · B 158`,
-tap to override, AUTO to hand back) → two status chips (`GPS ±5 m`, `OSM green`) → a 46-px
-distance number (green when GPS filled it, white when typed) → lie chips (approach only:
-fairway / rough) → flag chips (tight · water L · water R | wet · wind) → **the card** (club name
-big, swing tag, a coloured zone line, two why-lines, `Ghost: 5` in slate) → alternative-club chips
-(`PW 136 · 9i 152 · 8i 169`, 4-hybrid struck through on the tee) → hole nav (‹ · Score this hole · ›).
+### A. Caddie — the screen that matters
+Must contain:
+- Hole identity: number of 18, par, scorecard yardage, stroke index; the course name.
+- **A map of the hole**, satellite, oriented so the green is at the top. Layers the engineering
+  side already supplies: bunkers, water, the hole's centreline, the green outline, the golfer's
+  position with an accuracy ring when GPS is poor, and a **landing ellipse** for the recommended
+  club with 48 dots on its rim, each dot flagged when that miss would land in trouble.
+- **Where you are:** the phase (tee / approach / short / putt) chosen automatically from GPS, and
+  the distance to the green's front, middle and back. The golfer can override the phase and hand
+  it back to automatic.
+- **The distance** the recommendation is based on. GPS fills it; the golfer can type over it
+  (a laser rangefinder beats GPS) and revert. On the green it is a putt length in feet and is
+  always typed, because GPS cannot resolve feet.
+- **Conditions:** lie (fairway / rough, approach only) and flags: tight, water left, water right
+  (remembered per hole per course), wet, wind (kept for the round). Set rarely.
+- **The recommendation:** the club (the headline), a swing note (stock / easy), a one-line
+  summary (what it leaves, which zone that is and how good that zone is for this golfer, where to
+  aim), one or two why-lines, and a quiet **ghost status line** ("Ghost: 4") that is information
+  only, never a control.
+- **Alternatives:** the other clubs with what each leaves; choosing one shows its card so the
+  golfer can see why it lost. On the tee one club is banned and should read as such.
+- Hole navigation and a way to the Match screen to log the score.
+- Exit the round (with a confirmation when scores exist).
 
-Problems to solve:
-1. The card is the point of the screen and it sits below the fold on the tee.
-2. The distance number reads as the headline; the club name should.
-3. Status chips and the hole-map line matter only when something is wrong (no GPS, no green,
-   map still fetching). Design their error states, then make the happy state nearly invisible.
-4. Flags are set once per hole at most. They do not need a permanent row.
-5. The phase line carries four facts (phase, middle, front, back) plus two affordances.
+States to design: on the tee with GPS · approach at 140 · inside 50 · on the green · no GPS fix ·
+GPS denied · no green mapped for this hole (the golfer stands on it and marks it) · hole map still
+fetching / failed · wet flag on (club goes up two) · a typed distance overriding GPS · a manually
+overridden phase · an alternative club selected.
 
-States to show: on the tee with GPS · approach at 140 · inside 50 · on the green (putt: no map
-ellipse, typed feet, a hint that GPS cannot read feet) · no GPS fix · no green for this hole
-("stand on it and tap to mark") · hole map fetching / failed · wet flag on (club goes up two).
-
-Real copy to use in mockups (do not invent numbers):
-- Tee: **2-HYBRID** · stock · `leaves ~138 · GREEN ZONE` · "130–150 is your best number: 73% GIR,
-  ~26 ft." · "Driver leaves 107 — red zone — and 1 in 4 drives finds trouble." · `Ghost: 4`
-- Tee, tight: second line becomes "Your driver corridor is 108 yds. Need 50 clear each side."
-- Approach 140: **9-IRON** · stock · `140 · GREEN ZONE · center` · "130–150 is your best number —
-  go at it. 73% GIR, ~26 ft."
-- Approach 108: **GW** · easy · `108 · RED ZONE · back-center` · "100–130 is a damage-control
-  number (36% GIR). Center of the green, take the 30-footer." · "GW comes up short 24%. Long
-  almost never. Back-center."
-- Approach 165 from rough: **8-IRON** · "150–180 is a damage-control number (34% GIR). Center of
-  the green, take the 30-footer." · "From the rough you're fine — PW 83%, 9i 75% GIR from rough.
-  Don't over-protect."
-- Wet at 140: **7-IRON** · `carry the number` · "Wet: no roll-out. 7-iron is 2 clubs up from your
+Real content for mockups (use these; do not invent numbers):
+- Tee: **2-hybrid** · stock · leaves ~138 · green zone · "130–150 is your best number: 73% GIR,
+  ~26 ft." · "Driver leaves 107 — red zone — and 1 in 4 drives finds trouble." · Ghost: 4 ·
+  alternatives 2Hy 138 · 2i 135 · Dr 107 · 4Hy 163 (banned) · distances 415 to middle, front 400,
+  back 433 · GPS ±5 m.
+- Tee, tight: second line "Your driver corridor is 108 yds. Need 50 clear each side."
+- Approach 140, fairway: **9-iron** · stock · 140 · green zone · aim center · "130–150 is your best
+  number — go at it. 73% GIR, ~26 ft." · front 125, back 158 · alternatives PW 136 · 9i 152 · 8i 169.
+- Approach 108: **gap wedge** · easy · 108 · red zone · aim back-center · "100–130 is a
+  damage-control number (36% GIR). Center of the green, take the 30-footer." · "GW comes up short
+  24%. Long almost never. Back-center."
+- Approach 165, rough: **8-iron** · "150–180 is a damage-control number (34% GIR). Center of the
+  green, take the 30-footer." · "From the rough you're fine — PW 83%, 9i 75% GIR from rough. Don't
+  over-protect."
+- Wet at 140: **7-iron** · carry the number · "Wet: no roll-out. 7-iron is 2 clubs up from your
   stock 9-iron so 140 carries."
-- Short, 30 yds: "Land it pin-high or past — you're short 27% inside 25. From here your median is
-  14 ft; the up-and-down is the putt."
+- Short, 30 yards: "Land it pin-high or past — you're short 27% inside 25. From here your median
+  is 14 ft; the up-and-down is the putt."
 - Putt, 18 ft: "Start it a ball-width left of your read — 62% of your misses out here are right."
 - Putt, 30 ft: "Two-putt. Finish inside 3 ft, not 6 — your 4–6 footer is 42%."
-- Small sample suffix: "180–190 is your best number — go at it. 83% GIR, ~23 ft. (small sample)"
-- Tapping 4-hybrid on the tee: "4-hybrid off the tee: 36% trouble off the tee, −0.32 SG/shot."
+- Small-sample suffix: "… 83% GIR, ~23 ft. (small sample)"
+- Banned club tapped: "4-hybrid off the tee: 36% trouble off the tee, −0.32 SG/shot."
 
-Map layers (given, from the engineering side): satellite, hole-up; bunkers in amber outline, water
-in red; dashed centreline; green outline in brand green; the club's landing ellipse (white hairline,
-faint fill) with 48 rim dots, green normally and red where a miss lands in trouble; accuracy ring
-when GPS is worse than 8 m; white player dot. Attribution `© MapTiler © OpenStreetMap contributors`
-must stay legible in a corner.
+Zones are graded best / neutral / worst for this golfer and the grade should be legible at a
+glance; how is open.
 
-### B. Play (the ghost match)
-Fixed full-height, nothing scrolls: header (exit · course · CADDIE toggle · HOLE) → scoreboard
-(YOU 3 · 1 UP · GHOST 2, 34-px numerals) → running strokes-vs-ghost chart → six 3-hole segment
-cells (S1…S6 with won/lost/half or live margin) → FRONT 9 / BACK 9 / TOTAL pills → an 18-cell hole
-board (green = beat the ghost, red = lost, grey = tie, current hole outlined) → the score dial
-(roll to your number, tap to log; par centred) → Finalize button when the round is complete.
-Tapping a score auto-advances the hole. The Play ↔ Caddie toggle sits in the same header slot on
-both screens so it reads as one control; a segmented control or a swipe are both fair game.
+### B. Match — the ghost game
+Must contain: the same hole identity and course; **match points** for the golfer and the ghost
+with the live margin (e.g. 3 to 2, "1 up"); a running picture of strokes versus the ghost across
+the round; the six 3-hole segments (won / lost / halved, or the live margin while open); front
+nine, back nine and total; an **18-hole board** showing per hole whether the golfer beat, lost to,
+or tied the ghost, with the current hole marked and any hole tappable to jump; **score entry** for
+the current hole (par centred; today a roll-and-tap dial; the ghost's score for the hole and the
+stroke index shown alongside); logging a score advances the hole automatically; **Finalize** once
+every hole has a score; the way back to the Caddie; exit with confirmation.
 
 ### C. Setup
-Build tag top-right (`v19 · Sep 19`, the deploy counter Brett reads to confirm a new build) →
-Round history row → course search (debounced, with a state filter) → YOUR LAST-5 DIFFERENTIAL
-stepper with a source line (`Last-5: 8.2 · your official last-5 (Sep 5)`) → the selected course
-card: name · tee · "Ghost plays to 8 · par 72 · 71.2/128" · a ghost ring showing 80 · then two
-status lines that grew in v18.5/v19: `Hole map · 18/18 greens from OpenStreetMap` and `Satellite
-saved for offline · 254 tiles` (or `Satellite offline · 0/254 tiles — tap to save on wifi`) →
-START pinned at the bottom. The pre-round checklist ("ready for offline") wants a real home.
+Must contain: a build/version tag the golfer reads to confirm a new deploy loaded; entry to
+History; **course search** (network, debounced, with a region filter) and **tee selection**;
+the golfer's **last-5 differential** with a stepper and a source line ("your official last-5 (Sep 5)"
+or "from your last five rounds"); the **selected course card** (name, tee, "ghost plays to 8",
+par, rating/slope, and the ghost's projected gross, e.g. 80); **pre-round readiness**: hole map
+status (e.g. 18/18 greens found / fetching / failed, tap to retry) and satellite offline status
+(saved · 254 tiles / not saved, tap to save on wifi); **Start round**. Setup is the only screen
+used with reliable signal, so it is where readiness lives.
 
-### D. Summary and E. History
-Lower priority. Summary: FINAL · course, a full scorecard in Shot Pattern notation (circle =
-birdie, double circle = eagle, square = bogey, double square = double+), per-hole edit, New round.
-History: rounds list with per-round delete, W-L-T record, cloud backup panel (Google sign-in),
-manual export/import as JSON. Bring them into the same system; do not redesign their information.
+### D. Summary
+The finished round: final score versus the ghost, match result, a full 18-hole scorecard with
+par-relative marks (birdie, eagle, bogey, double), per-hole edit, and New round.
 
-## 5. Constraints that are not up for discussion
-- Black ground, the brand green, system type (no webfonts: offline-first, no signal at the course).
-- The ghost is a **status line** on the Caddie, never a control. `Ghost: 5` stays slate and quiet.
-- Every why-line cites a number. Wording can change; the number cited cannot.
-- Two screens with a toggle. A round opens on the Caddie. Play must be one tap away and back.
-- Thumb reach: the score dial, the hole nav, START, and the toggle are used one-handed.
-- The map's attribution line, the build tag on Setup, and the hole map / satellite status must
-  exist somewhere visible.
-- 375×812 is the design frame. No landscape.
+### E. History
+Past rounds with per-round delete, the win–loss–tie record, cloud backup sign-in and status,
+manual export/import. Lower priority; bring into the system, do not re-think the information.
+
+## 5. Functional constraints (not visual ones)
+- 375×812 portrait is the frame. No landscape.
+- Offline-first: no webfonts or remote assets in the UI; the map degrades to drawn geometry on a
+  plain background when tiles are missing.
+- The ghost status line on the Caddie is information, never a control.
+- Every why-line cites a number; wording may change, the cited number may not.
+- Thumb reach for the things used one-handed: score entry, hole navigation, the Caddie ↔ Match
+  switch, Start.
+- The map must carry a small attribution line ("© MapTiler © OpenStreetMap contributors").
+- The build tag on Setup must exist somewhere visible.
 
 ## 6. Deliverables
-1. Tokens: colour (with the light-on-black contrast checked for sunlight), type scale, spacing,
-   radius, one chip system, one card system, one header pattern, one bottom sheet.
-2. Caddie: the eight states in §4A at 375×812.
-3. Play: one screen, plus the toggle interaction.
-4. Setup: one screen showing the pre-round-ready state and the not-ready state.
-5. Summary and History: one screen each, tokens applied, no new information.
-6. A one-page rationale a Code thread can follow: what changed and why, screen by screen.
+1. Three distinct directions for the Caddie screen, tee state, before anything else.
+2. After one is chosen: tokens (colour, type, spacing, radius), a component set (headers, cards,
+   chips/toggles, sheets, numeric input, score entry), and the Caddie in the states listed in §4A.
+3. Match, then Setup (ready and not-ready), then Summary and History.
+4. A one-page rationale a Code thread can follow, screen by screen.
 
-## 7. Inputs to attach
-Screenshots of the current five screens at 375×812. The Code thread can produce these with the
-recipe in `docs/HANDOFF-redesign.md` §9, or take them on the phone. The app icon is
-`icon-512.png` in the repo root.
+## 7. Attachments
+Screenshots of the current five screens at 375×812, as evidence of content and density only.
+The Code thread can produce them with `docs/HANDOFF-redesign.md` §9, or take them on the phone.
