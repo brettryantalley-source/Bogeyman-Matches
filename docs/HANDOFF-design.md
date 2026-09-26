@@ -14,7 +14,9 @@ handoff is `docs/HANDOFF-redesign.md`.
 A golf app one person uses on an iPhone, on the course. Two jobs:
 1. **A match against a ghost.** The ghost is the golfer's own recent form projected onto the course
    being played. It has a fixed score on every hole. The golfer logs a score per hole and the app
-   scores the match: six 3-hole segments, front nine, back nine, total.
+   scores the match: six 3-hole segments (1 point each, ½ for a tie), front nine (½), back nine (½),
+   total (1) — 8 points. The feeling to capture: a head-to-head match against a silent,
+   ever-present opponent — competitive, a little haunted, quietly satisfying to track hole by hole.
 2. **A caddie.** Before every shot it says which club, where to aim, and why. The "why" is always one
    or two short lines that cite the golfer's own statistics.
 
@@ -95,13 +97,19 @@ glance; how is open.
 
 ### B. Match — the ghost game
 Must contain: the same hole identity and course; **match points** for the golfer and the ghost
-with the live margin (e.g. 3 to 2, "1 up"); a running picture of strokes versus the ghost across
+with the live margin (e.g. 2.5 to 0.5, "1 up"); a running picture of strokes versus the ghost across
 the round; the six 3-hole segments (won / lost / halved, or the live margin while open); front
 nine, back nine and total; an **18-hole board** showing per hole whether the golfer beat, lost to,
 or tied the ghost, with the current hole marked and any hole tappable to jump; **score entry** for
-the current hole (par centred; today a roll-and-tap dial; the ghost's score for the hole and the
-stroke index shown alongside); logging a score advances the hole automatically; **Finalize** once
-every hole has a score; the way back to the Caddie; exit with confirmation.
+the current hole — the goal is **one tap for par** (par centred; today a roll-and-tap dial; the
+ghost's score for the hole and the stroke index shown alongside); logging a score advances the
+hole automatically; **Finalize** once every hole has a score; the way back to the Caddie; exit
+with confirmation.
+
+Real content for a mid-round mockup: Sugar Creek Golf Club, Blue tee, 70.1/125, par 71; the ghost
+plays to 78. Hole 7, par 4, stroke index 5; the ghost makes 4 here. Match so far YOU 2.5 · GHOST
+0.5, "1 UP". Segments: S1 won (14–15), S2 won (14–16), S3–S6 not yet played. Front nine leading,
+back and total open. Per hole so far: H1 tie, H2 loss, H3 win, H4 win, H5 win, H6 win.
 
 ### C. Setup
 Must contain: a build/version tag the golfer reads to confirm a new deploy loaded; entry to
@@ -118,8 +126,9 @@ The finished round: final score versus the ghost, match result, a full 18-hole s
 par-relative marks (birdie, eagle, bogey, double), per-hole edit, and New round.
 
 ### E. History
-Past rounds with per-round delete, the win–loss–tie record, cloud backup sign-in and status,
-manual export/import. Lower priority; bring into the system, do not re-think the information.
+Past rounds with per-round delete, the win–loss–tie record (e.g. 4–2–1, streak W2, average margin
++1.4), cloud backup sign-in and status, manual export/import. Lower priority; bring into the
+system, do not re-think the information.
 
 ## 5. Functional constraints (not visual ones)
 - 375×812 portrait is the frame. No landscape.
