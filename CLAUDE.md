@@ -1,9 +1,13 @@
-# CLAUDE.md — Bogeyman Matches
+# CLAUDE.md — Ghost Match
 
 ## What this is
 A self-contained single-page web app (golf side game). Brett plays head-to-head against a handicap-calibrated "ghost" opponent scored from his last-5 rolling differential. Deployed as a static site on GitHub Pages, installed as a PWA on iPhone. Tone: casual, competitive.
+- The app is **Ghost Match** (renamed from "Bogeyman Matches" at v8). The GitHub repo, the Pages
+  URL and the localStorage keys still carry the old slug on purpose: renaming the repo changes the
+  live URL and forces a PWA reinstall, and renaming the keys is a data migration. Do neither without
+  Brett's explicit go.
 - Live URL: https://brettryantalley-source.github.io/Bogeyman-Matches/
-- Repo: brettryantalley-source/Bogeyman-Matches (this folder)
+- Repo: brettryantalley-source/Bogeyman-Matches (this folder — locally `ClaudeCode/Ghost-Match`)
 
 ## File layout
 - `src/app.jsx` — THE SOURCE OF TRUTH. All logic, courses, UI, and the scoring engine live here. Edit this.
@@ -73,7 +77,7 @@ Entries in the COURSES array use `mk(pars, strokeIndex)`:
   out as newer rounds are played.
 
 ## Working across threads (added Sep 26)
-- ONE working copy: this folder. `~/…/Claude/Bogeyman-Matches` is a stale July clone — never build there. Open every new thread in THIS folder, not its parent.
+- ONE working copy: this folder (`~/…/ClaudeCode/Ghost-Match`). `~/…/Claude/Bogeyman-Matches` is a stale July clone — never build there. Open every new thread in THIS folder, not its parent.
 - ONE code thread at a time on this working copy. Docs-only threads may overlap. Two code threads in parallel need separate git worktrees.
 - Handoffs live in `docs/`; `docs/README.md` says which is current. A thread that finishes a phase writes or updates its handoff, and the next thread starts by reading it.
 - Every thread starts with: `git status` (must be clean), `git log --oneline -3`, `npm test`. Every thread ends with its work committed and the push command handed to Brett.
