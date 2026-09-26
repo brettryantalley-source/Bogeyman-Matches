@@ -72,6 +72,13 @@ Entries in the COURSES array use `mk(pars, strokeIndex)`:
   last-5 as a baked-in floor; seeds feed the differential only, never the W-L-T, and age
   out as newer rounds are played.
 
+## Working across threads (added Sep 26)
+- ONE working copy: this folder. `~/…/Claude/Bogeyman-Matches` is a stale July clone — never build there. Open every new thread in THIS folder, not its parent.
+- ONE code thread at a time on this working copy. Docs-only threads may overlap. Two code threads in parallel need separate git worktrees.
+- Handoffs live in `docs/`; `docs/README.md` says which is current. A thread that finishes a phase writes or updates its handoff, and the next thread starts by reading it.
+- Every thread starts with: `git status` (must be clean), `git log --oneline -3`, `npm test`. Every thread ends with its work committed and the push command handed to Brett.
+- `computeGhost` / `evalMatch` byte-identical check before every commit, as before.
+
 ## Model guidance
 - Mechanical, pre-specified work (adding a verified course, changing a constant): Sonnet or Haiku.
 - Structural changes (new features, new screens, changes to state flow): Opus. Switch with /model.
